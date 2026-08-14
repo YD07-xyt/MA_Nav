@@ -10,8 +10,9 @@
 
 //controller
 #include "planner/controller/omni_lmpc.hpp"
-//gcopter
-#include "planner/fsm/fsm.hpp"
+//nav
+#include"planner/replan/fsm_replanner.h"
+//#include "planner/fsm/fsm.hpp"
 
 
 //3rd
@@ -19,7 +20,7 @@
 //log
 #include <spdlog/spdlog.h>
 //ros2 
-#include "ros2/misc/visualizer.hpp"
+
 #include "utils/plotter.hpp"
 #include "utils/type_utils.hpp"
 
@@ -39,6 +40,7 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <pcl_conversions/pcl_conversions.h>  
+#include "ros2/misc/visualizer.hpp"
 //std
 #include <optional>
 #include <cstddef>
@@ -84,7 +86,8 @@ private:
   std::shared_ptr<grid_map::GridMap> grid_map_;
   std::shared_ptr<ma_map::MaMap> ma_map_;
   //重规划
-  FSM fsm_;
+  replan::FsmReplan fsm_replanner;
+  //FSM fsm_;
   tools::Plotter plotter_;
 private:
   //contorller
@@ -93,7 +96,7 @@ private:
   SplineTrajectory::PPolyND<2, 6> trajectory_;
   std::chrono::steady_clock::time_point start_time_;
 public:
-  explicit GlobalPlanner2d(rclcpp::Node::SharedPtr nh_);
+  explicit GlobalPlanner2d(rclcpp::Node::SharedPtr nh_,std::string params_path);
   void map_callback(const sensor_msgs::msg::PointCloud2::SharedPtr &msg);
   void odom_callback(const nav_msgs::msg::Odometry::SharedPtr &msg);
   void target_callback(const geometry_msgs::msg::PoseStamped::SharedPtr &msg);

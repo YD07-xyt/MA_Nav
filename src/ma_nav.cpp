@@ -1,4 +1,5 @@
 #include "ros2/ros2_node.h"
+#include <string>
 
 int main(int argc, char **argv) {
 
@@ -7,7 +8,8 @@ int main(int argc, char **argv) {
   auto nh = std::make_shared<rclcpp::Node>("global_planning_node");
 
   //planner::GlobalPlanner global_planner(nh);
-  planner::GlobalPlanner2d global_planner_2d(nh);
+  std::string params_path="/home/xyt/map/src/MA_Nav/config/planner.yaml";
+  planner::GlobalPlanner2d global_planner_2d(nh,params_path);
   rclcpp::WallRate rate(1000);
   while (rclcpp::ok()) {
     rclcpp::spin_some(nh);

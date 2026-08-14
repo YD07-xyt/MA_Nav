@@ -1,7 +1,7 @@
 #pragma once
 
 #include "planner/opt/traj_optimizer.hpp"
-#include "planner/path_searching/astar.hpp"
+#include "planner/path_planning/astar.h"
 #include "utils/type_utils.hpp"
 #include "utils/logger.hpp"
 #include <Eigen/Core>

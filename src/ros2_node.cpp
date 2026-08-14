@@ -18,36 +18,36 @@
 #include <yaml-cpp/yaml.h>
 
 namespace planner {
-GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_):
-    config(nh_),
+GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_,std::string params_path):
+    config(params_path),
     nh(nh_),
     mapInitialized(false),
     visualizer(nh_),
-    fsm_(config.fsm_config),
+    //fsm_(config.fsm_config),
     plotter_(),
     ma_map_(std::make_shared<ma_map::MaMap>(config.map_params_path)),
     omni_lmpc_(config.lmpc_param) {
     start_time_ = std::chrono::steady_clock::now();
 
     mapSub = nh->create_subscription<sensor_msgs::msg::PointCloud2>(
-        config.mapTopic,
+        config.map_topic_name,
         rclcpp::SensorDataQoS(),
         [this](const sensor_msgs::msg::PointCloud2::SharedPtr msg) { GlobalPlanner2d::map_callback(msg); }
     );
     OdomSub = nh->create_subscription<nav_msgs::msg::Odometry>(
-        config.odomTopic,
+        config.odom_topic_name,
         rclcpp::QoS(10),
         [this](const nav_msgs::msg::Odometry::SharedPtr msg) { GlobalPlanner2d::odom_callback(msg); }
     );
     targetSub = nh->create_subscription<geometry_msgs::msg::PoseStamped>(
-        config.targetTopic,
+        config.target_topic_name,
         rclcpp::QoS(10),
         [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { target_callback(msg); }
     );
     // 接收 rviz2 "Publish Point" 工具点选的点（geometry_msgs/PointStamped，默认 /clicked_point），
     // 每 4 个点连成一个封闭四边形区域并发布到 /ma_nav/clicked_regions 可视化
     clickedPointSub = nh->create_subscription<geometry_msgs::msg::PointStamped>(
-        config.clickedPointTopic,
+        config.clickedPoint_topic_name,
         rclcpp::QoS(10),
         [this](const geometry_msgs::msg::PointStamped::SharedPtr msg) { clicked_point_callback(msg); }
     );
@@ -79,7 +79,7 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_):
     );
     ma_map_->set_mapping_model(config.mapping_model);
     if (!config.mapping_model) {
-        load_global_map("/home/xyt/map/src/gcopter/map/global_map.pgm");
+        load_global_map("config.global_map_path");
     }
 }
 void GlobalPlanner2d::controller_callback() {
@@ -156,27 +156,58 @@ void GlobalPlanner2d::plan_omni() {
         return;
     }
 
-    auto result = fsm_.plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
+    auto result = fsm_replanner.plan(goal_pose.value(), current_pose.value(),  ma_map_->get_grid_map());
     if (result) {
-        auto [astar_path, opt] = result.value();
-        visualizer.PubGlobalPath(astar_path);
-        std::vector<Eigen::Vector2d> opt_path = opt.sampleTrajectory(0.1);
-        visualizer.PubOptPath(opt_path);
+        auto [path, opt] = result.value();
+        visualizer.PubGlobalPath(path.raw_path);
+        //std::vector<Eigen::Vector2d> opt_path = opt.sampleTrajectory(0.1);
+        visualizer.PubOptPath(path.optimized_path);
 
-        trajectory_ = opt.getTrajectory();
+        //trajectory_ = opt.getTrajectory();
         // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点(全轨迹搜索),
         // 而不是 reset_track() 清零——清零会让参考回退到起点附近,MPC 急刹减速
         // (update_track_time 搜索窗口只有 [t_track_-0.3, t_track_+3.0],游标为 0 时只搜前 3s)
-        if (current_XYTheta.has_value()) {
-            omni_lmpc_.initialize_track(*current_XYTheta, trajectory_);
-        } else {
-            omni_lmpc_.reset_track();
-        }
-        visualizer.PubWayPoints(trajectory_);
-        std::vector<Eigen::Vector2d> dense_path = opt.sampleTrajectory(0.02);
-        visualizer.PubTrajectory(trajectory_, dense_path);
+        // if (current_XYTheta.has_value()) {
+        //     omni_lmpc_.initialize_track(*current_XYTheta, trajectory_);
+        // } else {
+        //     omni_lmpc_.reset_track();
+        // }
+        // visualizer.PubWayPoints(trajectory_);
+        // std::vector<Eigen::Vector2d> dense_path = opt.sampleTrajectory(0.02);
+        // visualizer.PubTrajectory(trajectory_, dense_path);
     }
 }
+// void GlobalPlanner2d::plan_omni() {
+//     if (this->goal_pose == std::nullopt) {
+//         logger::ros2->debug("no goal");
+//         return;
+//     }
+//     if (this->current_pose == std::nullopt) {
+//         logger::ros2->debug("no current_pose");
+//         return;
+//     }
+
+//     auto result = fsm_.plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
+//     if (result) {
+//         auto [astar_path, opt] = result.value();
+//         visualizer.PubGlobalPath(astar_path);
+//         std::vector<Eigen::Vector2d> opt_path = opt.sampleTrajectory(0.1);
+//         visualizer.PubOptPath(opt_path);
+
+//         trajectory_ = opt.getTrajectory();
+//         // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点(全轨迹搜索),
+//         // 而不是 reset_track() 清零——清零会让参考回退到起点附近,MPC 急刹减速
+//         // (update_track_time 搜索窗口只有 [t_track_-0.3, t_track_+3.0],游标为 0 时只搜前 3s)
+//         if (current_XYTheta.has_value()) {
+//             omni_lmpc_.initialize_track(*current_XYTheta, trajectory_);
+//         } else {
+//             omni_lmpc_.reset_track();
+//         }
+//         visualizer.PubWayPoints(trajectory_);
+//         std::vector<Eigen::Vector2d> dense_path = opt.sampleTrajectory(0.02);
+//         visualizer.PubTrajectory(trajectory_, dense_path);
+//     }
+// }
 void GlobalPlanner2d::odom_callback(const nav_msgs::msg::Odometry::SharedPtr& msg) {
     if (!current_pose.has_value()) {
         current_pose = utils::RobotState();

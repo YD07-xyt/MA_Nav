@@ -5,7 +5,7 @@ int main(int argc, char **argv) {
 
   rclcpp::init(argc, argv);
 
-  auto nh = std::make_shared<rclcpp::Node>("global_planning_node");
+  auto nh = std::make_shared<rclcpp::Node>("ma_nav_node");
 
   //planner::GlobalPlanner global_planner(nh);
   std::string params_path="/home/xyt/map/src/MA_Nav/config/planner.yaml";

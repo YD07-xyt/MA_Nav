@@ -18,7 +18,7 @@
 #include <yaml-cpp/yaml.h>
 
 namespace planner {
-GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_,std::string params_path):
+GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params_path):
     config(params_path),
     nh(nh_),
     mapInitialized(false),
@@ -28,25 +28,26 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_,std::string params_
     ma_map_(std::make_shared<ma_map::MaMap>(config.map_params_path)),
     omni_lmpc_(config.lmpc_param) {
     start_time_ = std::chrono::steady_clock::now();
+    fsm_replanner.set_param(config.planner_config);
 
-    mapSub = nh->create_subscription<sensor_msgs::msg::PointCloud2>(
+    map_sub_ = nh->create_subscription<sensor_msgs::msg::PointCloud2>(
         config.map_topic_name,
         rclcpp::SensorDataQoS(),
         [this](const sensor_msgs::msg::PointCloud2::SharedPtr msg) { GlobalPlanner2d::map_callback(msg); }
     );
-    OdomSub = nh->create_subscription<nav_msgs::msg::Odometry>(
+    odom_sub_ = nh->create_subscription<nav_msgs::msg::Odometry>(
         config.odom_topic_name,
         rclcpp::QoS(10),
         [this](const nav_msgs::msg::Odometry::SharedPtr msg) { GlobalPlanner2d::odom_callback(msg); }
     );
-    targetSub = nh->create_subscription<geometry_msgs::msg::PoseStamped>(
+    target_sub_ = nh->create_subscription<geometry_msgs::msg::PoseStamped>(
         config.target_topic_name,
         rclcpp::QoS(10),
         [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { target_callback(msg); }
     );
     // 接收 rviz2 "Publish Point" 工具点选的点（geometry_msgs/PointStamped，默认 /clicked_point），
     // 每 4 个点连成一个封闭四边形区域并发布到 /ma_nav/clicked_regions 可视化
-    clickedPointSub = nh->create_subscription<geometry_msgs::msg::PointStamped>(
+    clickedPoint_sub_ = nh->create_subscription<geometry_msgs::msg::PointStamped>(
         config.clickedPoint_topic_name,
         rclcpp::QoS(10),
         [this](const geometry_msgs::msg::PointStamped::SharedPtr msg) { clicked_point_callback(msg); }
@@ -79,7 +80,7 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_,std::string params_
     );
     ma_map_->set_mapping_model(config.mapping_model);
     if (!config.mapping_model) {
-        load_global_map("config.global_map_path");
+        load_global_map(config.global_map_path);
     }
 }
 void GlobalPlanner2d::controller_callback() {
@@ -100,18 +101,15 @@ void GlobalPlanner2d::controller_callback() {
         if (std::abs(yaw_err) > 0.03) {
             // 到位旋转:大误差段 P 控制 + 最小转速保证(避免纯 P 尾段指数爬行、
             // “最后几度磨半天”);小误差段纯 P 平滑收敛(强制最小转速会过冲振荡)
-            constexpr double kYaw = 4.0;   // 角速度增益
-            constexpr double kWMax = 3.0;  // 最大角速度 rad/s(与 lmpc.u_max_w=4.0 同量级)
-            constexpr double kWMin = 0.6;  // 最小角速度 rad/s(误差 >0.08 rad 时生效)
+            constexpr double kYaw = 4.0; // 角速度增益
+            constexpr double kWMax = 3.0; // 最大角速度 rad/s(与 lmpc.u_max_w=4.0 同量级)
+            constexpr double kWMin = 0.6; // 最小角速度 rad/s(误差 >0.08 rad 时生效)
             constexpr double kBang = 0.08; // 大误差/小误差切换阈值 rad
             double w = kYaw * yaw_err;
-            if (std::abs(yaw_err) > kBang)
-            {
+            if (std::abs(yaw_err) > kBang) {
                 const double w_abs = std::max(kWMin, std::min(kWMax, std::abs(w)));
                 w = std::copysign(w_abs, yaw_err);
-            }
-            else
-            {
+            } else {
                 w = std::max(-kWMax, std::min(kWMax, w));
             }
             geometry_msgs::msg::Twist rot;
@@ -156,7 +154,7 @@ void GlobalPlanner2d::plan_omni() {
         return;
     }
 
-    auto result = fsm_replanner.plan(goal_pose.value(), current_pose.value(),  ma_map_->get_grid_map());
+    auto result = fsm_replanner.plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
     if (result) {
         auto [path, opt] = result.value();
         visualizer.PubGlobalPath(path.raw_path);
@@ -322,7 +320,7 @@ void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStam
     region.color.g = 1.0;
     region.color.b = 0.0;
     region.color.a = 1.0;
-    for (const auto& p : clicked_points_) {
+    for (const auto& p: clicked_points_) {
         region.points.push_back(p);
     }
     region.points.push_back(clicked_points_.front()); // 首点重复以闭合

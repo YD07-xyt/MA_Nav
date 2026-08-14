@@ -1,13 +1,13 @@
 ros2:
-  map_topic_name: "/map"
-  target_topic_name: "/target"
+  map_topic_name: "/lio/cloud_world"
+  target_topic_name: "/goal_pose"
   clickedPoint_topic_name: "/clicked_point"
-  odom_topic_name: "/odom"
+  odom_topic_name: "/lio/base_odom"
   map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"
   global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm"
 
 map:
-  mapping_model: true   # true 建图模式，false 规划模式
+  mapping_model: false   # true 建图模式，false 规划模式
 
 planner_config:
   opt_params:

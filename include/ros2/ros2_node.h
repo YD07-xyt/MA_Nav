@@ -58,10 +58,10 @@ class GlobalPlanner2d {
 private:
   Config config;
   rclcpp::Node::SharedPtr nh;
-  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr mapSub;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr targetSub;
-  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr clickedPointSub;
-  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr OdomSub;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr map_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr target_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr clickedPoint_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr clicked_region_pub_;
 

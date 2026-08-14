@@ -1,5 +1,6 @@
 #pragma once
 #include "astar.h"
+#include "planner/path_planning/jps.h"
 #include "post_processing.h"
 #include <optional>
 namespace path_planning {
@@ -7,21 +8,24 @@ class PathPlanning {
 public:
     auto set_map(const grid_map::GridMap& grid_map) -> void {
         astar_.set_map(grid_map);
+       
         post_processing_.set_map(grid_map);
     };
     auto set_param(const PathPostProcessing::PathPostProcessingParams& params) -> void {
         astar_.set_safe_threshold(params.safe_threshold);
+        
         post_processing_.set_params(params);
+
     }
     auto path_planning(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, int timeout_ms)
         -> std::optional<PathPostProcessing::Trajectory> {
-        utils::TimeConsuming timer("Astar", true); // true 表示允许打印
+        utils::TimeConsuming timer("Planning", true); // true 表示允许打印
 
         PathPostProcessing::Trajectory traj;
 
         // 1. Original A* search
         traj.raw_path = astar_.original_astar_search(start, goal, timeout_ms);
-
+        
         if (traj.raw_path.empty()) {
             return std::nullopt;
         }

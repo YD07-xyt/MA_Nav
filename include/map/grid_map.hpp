@@ -171,10 +171,15 @@ public:
         return true;
     }
 
+    // bool isCollision(const Eigen::Vector2d& pos, double safe_threshold = 0.0) const {
+    //     return !isInMap(pos) || getDistance(pos) < safe_threshold;
+    // }
     bool isCollision(const Eigen::Vector2d& pos, double safe_threshold = 0.0) const {
-        return !isInMap(pos) || getDistance(pos) < safe_threshold;
+        if(!isInMap(pos)){
+            return false;
+        }
+        return  getDistance(pos) < safe_threshold;
     }
-
     bool isLineOccupancy(const Eigen::Vector2d& p1, const Eigen::Vector2d& p2) const {
         Eigen::Vector2d diff = p2 - p1;
         double max_dist = diff.norm();

@@ -3,6 +3,7 @@
 #include "planner/opt/traj_optimizer.hpp"
 #include "planner/path_planning/post_processing.h"
 #include "utils/expected.hpp"
+#include "utils/logger.hpp"
 #include "utils/type_utils.hpp"
 #include <optional>
 namespace replan {
@@ -47,10 +48,13 @@ public:
         path_planning.set_map(*grid_map);
         Eigen::Vector2d start(current_pose.p.x(), current_pose.p.y());
         Eigen::Vector2d goal(goal_pose.p.x(), goal_pose.p.y());
+        //logger::fsm_replan->info("start planning");
         auto trajectory=path_planning.path_planning(start, goal, 5000);
         if(!trajectory.has_value()){
+            logger::fsm_replan->info("planning failed");
             return tl::make_unexpected(PathError::FAILED);
         }
+        //logger::fsm_replan->info("end planning");
         return std::make_pair(trajectory.value(), EsdfTrajectoryOptimizer);
     };
 

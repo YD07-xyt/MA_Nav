@@ -15,6 +15,7 @@
 #include <string>
 #include <tf2/LinearMath/Matrix3x3.hpp>
 #include <tf2/LinearMath/Quaternion.hpp>
+#include <vector>
 #include <yaml-cpp/yaml.h>
 
 namespace planner {
@@ -160,8 +161,11 @@ void GlobalPlanner2d::plan_omni() {
         visualizer.PubGlobalPath(path.raw_path);
         //std::vector<Eigen::Vector2d> opt_path = opt.sampleTrajectory(0.1);
         visualizer.PubOptPath(path.optimized_path);
-
-        //trajectory_ = opt.getTrajectory();
+        std::vector<Eigen::Vector3d> route;
+        for(auto point:path.optimized_path){
+            route.emplace_back(point.x(),point.y(),0.0);
+        }
+        visualizer.visualize(opt,route);
         // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点(全轨迹搜索),
         // 而不是 reset_track() 清零——清零会让参考回退到起点附近,MPC 急刹减速
         // (update_track_time 搜索窗口只有 [t_track_-0.3, t_track_+3.0],游标为 0 时只搜前 3s)
@@ -175,37 +179,7 @@ void GlobalPlanner2d::plan_omni() {
         // visualizer.PubTrajectory(trajectory_, dense_path);
     }
 }
-// void GlobalPlanner2d::plan_omni() {
-//     if (this->goal_pose == std::nullopt) {
-//         logger::ros2->debug("no goal");
-//         return;
-//     }
-//     if (this->current_pose == std::nullopt) {
-//         logger::ros2->debug("no current_pose");
-//         return;
-//     }
 
-//     auto result = fsm_.plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
-//     if (result) {
-//         auto [astar_path, opt] = result.value();
-//         visualizer.PubGlobalPath(astar_path);
-//         std::vector<Eigen::Vector2d> opt_path = opt.sampleTrajectory(0.1);
-//         visualizer.PubOptPath(opt_path);
-
-//         trajectory_ = opt.getTrajectory();
-//         // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点(全轨迹搜索),
-//         // 而不是 reset_track() 清零——清零会让参考回退到起点附近,MPC 急刹减速
-//         // (update_track_time 搜索窗口只有 [t_track_-0.3, t_track_+3.0],游标为 0 时只搜前 3s)
-//         if (current_XYTheta.has_value()) {
-//             omni_lmpc_.initialize_track(*current_XYTheta, trajectory_);
-//         } else {
-//             omni_lmpc_.reset_track();
-//         }
-//         visualizer.PubWayPoints(trajectory_);
-//         std::vector<Eigen::Vector2d> dense_path = opt.sampleTrajectory(0.02);
-//         visualizer.PubTrajectory(trajectory_, dense_path);
-//     }
-// }
 void GlobalPlanner2d::odom_callback(const nav_msgs::msg::Odometry::SharedPtr& msg) {
     if (!current_pose.has_value()) {
         current_pose = utils::RobotState();

@@ -1,7 +1,9 @@
 #pragma once
 #include "map/grid_map.hpp"
 #include "map/ma_map.hpp"
-#include "planner/opt/traj_optimizer.hpp"
+// #include "planner/opt/traj_optimizer.hpp"
+#include "planner/traj_optimize/SplineTrajectory/SplineTrajectory.hpp"
+#include "planner/traj_optimize/minco_opt/gcopter/trajectory.hpp"
 #include "utils/eigen_alias.hpp"
 #include "utils/color_msg_utils.hpp"
 #include <chrono>
@@ -36,8 +38,8 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr edgePub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr spherePub;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr Mappub; // Mappub
-    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_occ_pub;   // 占用栅格 OccupancyGrid
-    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_esdf_pub;  // 2D ESDF OccupancyGrid
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_occ_pub; // 占用栅格 OccupancyGrid
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_esdf_pub; // 2D ESDF OccupancyGrid
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr SurfMapPub; // SurfMappub
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr GlobalPathPub;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr OptPathPub;
@@ -77,6 +79,102 @@ public:
         frontier_pub = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ma_nav/map/frontier", 10);
         mkr_arr_pub = node->create_publisher<visualization_msgs::msg::MarkerArray>("/ma_nav/map/map_bound", 10);
     }
+    // Visualize the trajectory and its front-end path
+    template<int D>
+    inline void visualize(const Trajectory<D,2>& traj, const std::vector<Eigen::Vector3d>& route) {
+        visualization_msgs::msg::Marker routeMarker, wayPointsMarker, trajMarker;
+
+        routeMarker.id = 0;
+        routeMarker.type = visualization_msgs::msg::Marker::LINE_LIST;
+        routeMarker.header.stamp = node->now();
+        routeMarker.header.frame_id = "world";
+        routeMarker.pose.orientation.w = 1.00;
+        routeMarker.action = visualization_msgs::msg::Marker::ADD;
+        routeMarker.ns = "route";
+        routeMarker.color.r = 1.00;
+        routeMarker.color.g = 0.00;
+        routeMarker.color.b = 0.00;
+        routeMarker.color.a = 1.00;
+        routeMarker.scale.x = 0.1;
+
+        wayPointsMarker = routeMarker;
+        wayPointsMarker.id = -wayPointsMarker.id - 1;
+        wayPointsMarker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+        wayPointsMarker.ns = "waypoints";
+        wayPointsMarker.color.r = 1.00;
+        wayPointsMarker.color.g = 0.00;
+        wayPointsMarker.color.b = 0.00;
+        wayPointsMarker.scale.x = 0.35;
+        wayPointsMarker.scale.y = 0.35;
+        wayPointsMarker.scale.z = 0.35;
+
+        trajMarker = routeMarker;
+        trajMarker.header.frame_id = "world";
+        trajMarker.id = 0;
+        trajMarker.ns = "trajectory";
+        trajMarker.color.r = 0.00;
+        trajMarker.color.g = 0.50;
+        trajMarker.color.b = 1.00;
+        trajMarker.scale.x = 0.30;
+
+        if (route.size() > 0) {
+            bool first = true;
+            Eigen::Vector3d last;
+            for (auto it: route) {
+                if (first) {
+                    first = false;
+                    last = it;
+                    continue;
+                }
+                geometry_msgs::msg::Point point;
+
+                point.x = last(0);
+                point.y = last(1);
+                point.z = last(2);
+                routeMarker.points.push_back(point);
+                point.x = it(0);
+                point.y = it(1);
+                point.z = it(2);
+                routeMarker.points.push_back(point);
+                last = it;
+            }
+
+            routePub->publish(routeMarker);
+        }
+
+        if (traj.getPieceNum() > 0) {
+            Eigen::MatrixXd wps = traj.getPositions();
+            for (int i = 0; i < wps.cols(); i++) {
+                geometry_msgs::msg::Point point;
+                point.x = wps.col(i)(0);
+                point.y = wps.col(i)(1);
+                point.z = (wps.rows() > 2) ? wps.col(i)(2) : 0.0;
+                wayPointsMarker.points.push_back(point);
+            }
+
+            wayPointsPub->publish(wayPointsMarker);
+        }
+
+        if (traj.getPieceNum() > 0) {
+            double T = 0.01;
+            Eigen::Vector3d lastX = traj.getPos(0.0);
+            for (double t = T; t < traj.getTotalDuration(); t += T) {
+                geometry_msgs::msg::Point point;
+                Eigen::Vector3d X = traj.getPos(t);
+                point.x = lastX(0);
+                point.y = lastX(1);
+                point.z = lastX(2);
+                trajMarker.points.push_back(point);
+                point.x = X(0);
+                point.y = X(1);
+                point.z = X(2);
+                trajMarker.points.push_back(point);
+                lastX = X;
+            }
+            trajectoryPub->publish(trajMarker);
+        }
+    }
+
     void PubWayPoints(SplineTrajectory::PPolyND<2, 6> traj) {
         // 1. 航点
         visualization_msgs::msg::Marker waypoints_marker;
@@ -411,8 +509,7 @@ public:
         // OccupancyGrid 数据为行主序：data[y*width+x]，(0,0) 位于 origin 角点
         for (int x = 0; x < voxel_num.x(); ++x) {
             for (int y = 0; y < voxel_num.y(); ++y) {
-                grid_msg.data[y * voxel_num.x() + x] =
-                    grid_map.isOccupied(Eigen::Vector2i(x, y)) ? 100 : 0;
+                grid_msg.data[y * voxel_num.x() + x] = grid_map.isOccupied(Eigen::Vector2i(x, y)) ? 100 : 0;
             }
         }
         grid_occ_pub->publish(grid_msg);

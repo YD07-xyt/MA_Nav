@@ -1,6 +1,6 @@
 #pragma once
 
-#include "planner/opt/traj_optimizer.hpp"
+#include "planner/traj_optimize/traj_optimizer.h"
 #include <Eigen/Core>
 #include <Eigen/Sparse>
 #include <OsqpEigen/Solver.hpp>

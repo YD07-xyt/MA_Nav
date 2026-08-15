@@ -14,3 +14,11 @@ synchronizeWorkingState(ctx, x)
         ▼
 采样 ctx.runtime.state.spline ──► 回填 Trajectory(格式不变,下游 MPC/可视化零改动)
 */
+#pragma once
+#include"SplineTrajectory/SplineOptimizer.hpp"
+namespace trajectory_optimize{
+    class TrajectoryOptimizer{
+        private:
+            
+    };
+}

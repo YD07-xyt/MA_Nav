@@ -1,0 +1,51 @@
+/*
+    GridMap -> minco_opt::ESDFInterface 适配器
+    把现有 2D 栅格地图的 ESDF(有符号距离场)暴露给 MincoOptimizer 使用。
+*/
+
+#pragma once
+
+#include "map/grid_map.hpp"
+#include "minco_optimizer.hpp"
+
+#include <memory>
+#include <utility>
+
+namespace minco_opt {
+
+/**
+ * @brief grid_map::GridMap -> ESDFInterface 适配器
+ *
+ * 语义对齐:
+ * - getDistance: 自由空间为正、障碍物内为负,与库期望的"有符号距离"一致;
+ *   地图外点 GridMap::getDistance 返回 max,库内部有 isInside 前置判断,安全。
+ * - getGradient : 距离场梯度(方向远离障碍),供避障代价链式求导。
+ * - isInside    : 地图外点不做避障/可行性采样惩罚。
+ *
+ * 注意:构造后 map 指针必须保持有效,直到优化结束
+ *       (由调用方持有的 shared_ptr 保证)。
+ */
+class GridMapESDF : public ESDFInterface {
+public:
+    explicit GridMapESDF(std::shared_ptr<grid_map::GridMap> map) : map_(std::move(map)) {}
+
+    double getDistance(double x, double y) const override {
+        return map_->getDistance(Eigen::Vector2d(x, y));
+    }
+
+    Eigen::Vector2d getGradient(double x, double y) const override {
+        double d = 0.0;
+        Eigen::Vector2d grad = Eigen::Vector2d::Zero();
+        map_->getDistanceAndGradient(Eigen::Vector2d(x, y), d, grad);
+        return grad;
+    }
+
+    bool isInside(double x, double y) const override {
+        return map_->isInsideMap(Eigen::Vector2d(x, y));
+    }
+
+private:
+    std::shared_ptr<grid_map::GridMap> map_;
+};
+
+} // namespace minco_opt

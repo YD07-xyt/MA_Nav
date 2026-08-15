@@ -1,6 +1,6 @@
 #pragma once
 #include "planner/path_planning/path_planning.hpp"
-#include "planner/opt/traj_optimizer.hpp"
+#include "planner/traj_optimize/traj_optimizer.hpp"
 #include "planner/path_planning/post_processing.h"
 #include "utils/expected.hpp"
 #include "utils/logger.hpp"
@@ -49,6 +49,7 @@ public:
         Eigen::Vector2d start(current_pose.p.x(), current_pose.p.y());
         Eigen::Vector2d goal(goal_pose.p.x(), goal_pose.p.y());
         //logger::fsm_replan->info("start planning");
+        path_planning.set_use_jps(true);
         auto trajectory=path_planning.path_planning(start, goal, 5000);
         if(!trajectory.has_value()){
             logger::fsm_replan->info("planning failed");

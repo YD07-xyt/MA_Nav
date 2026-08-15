@@ -8,14 +8,18 @@ class PathPlanning {
 public:
     auto set_map(const grid_map::GridMap& grid_map) -> void {
         astar_.set_map(grid_map);
-       
+        jps_.set_map(grid_map);
         post_processing_.set_map(grid_map);
     };
     auto set_param(const PathPostProcessing::PathPostProcessingParams& params) -> void {
         astar_.set_safe_threshold(params.safe_threshold);
-        
+        jps_.set_safe_threshold(params.safe_threshold);
         post_processing_.set_params(params);
 
+    }
+    // 选择底层图搜索算法:默认 A*,开启后改用 JPS(空旷/稀疏障碍下快一个数量级)
+    auto set_use_jps(bool use_jps) -> void {
+        use_jps_ = use_jps;
     }
     auto path_planning(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, int timeout_ms)
         -> std::optional<PathPostProcessing::Trajectory> {
@@ -23,8 +27,9 @@ public:
 
         PathPostProcessing::Trajectory traj;
 
-        // 1. Original A* search
-        traj.raw_path = astar_.original_astar_search(start, goal, timeout_ms);
+        // 1. Grid search: JPS or original A*
+        traj.raw_path = use_jps_ ? jps_.jps_search(start, goal, timeout_ms)
+                                 : astar_.original_astar_search(start, goal, timeout_ms);
         
         if (traj.raw_path.empty()) {
             return std::nullopt;
@@ -49,6 +54,8 @@ public:
 
 private:
     AStar astar_;
+    JPS jps_;
+    bool use_jps_ = false;
     PathPostProcessing post_processing_;
 };
 }

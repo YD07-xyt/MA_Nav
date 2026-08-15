@@ -43,7 +43,7 @@ planner_config:
     hard_clearance: 0.3
 
   path_planning_params:
-    safe_threshold: 0.45
+    safe_threshold: 0.4
     max_vel: 3.0
     max_acc: 3.0
     time_resolution: 0.1

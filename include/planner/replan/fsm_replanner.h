@@ -1,4 +1,5 @@
 #pragma once
+#include "map/grid_map.hpp"
 #include "planner/path_planning/path_planning.hpp"
 #include "planner/traj_optimize/minco_opt/grid_map_esdf.hpp"
 #include "planner/traj_optimize/minco_opt/minco_optimizer.hpp"
@@ -6,16 +7,18 @@
 #include "utils/expected.hpp"
 #include "utils/logger.hpp"
 #include "utils/type_utils.hpp"
+#include <Eigen/src/Core/Matrix.h>
 #include <algorithm>
 #include <cmath>
 #include <memory>
 #include <optional>
+#include <vector>
 namespace replan {
 class FsmReplan {
 public:
     //重规划触发参数
     struct ReplanParam {
-        Eigen::Vector3d deviation;
+        Eigen::Vector3d goal_deviation;
         double replan_interval; // 路径最大年龄（s），超过则强制重规划
         double replan_lateral_dev; // 横向偏差阈值（m），机器人偏离参考路径超过则重规划
         double min_replan_interval; // 最小重规划间隔（s），防抖，避免多触发源共振
@@ -25,167 +28,161 @@ public:
             // 应 ≤ 通道允许的最小净空（≈通道半宽）；太小失去安全网，太大窄缝永远过不去
     } replan_param;
     struct PlannerConfig {
-        
         ReplanParam replan_params;
+        minco_opt::MincoOptimizerConfig minco_opt_params;
         path_planning::PathPostProcessing::PathPostProcessingParams path_planning_params;
     } planner_config_;
     auto set_param(const PlannerConfig& planner_config) -> void {
         planner_config_ = planner_config;
         path_planning.set_param(planner_config_.path_planning_params);
     };
-    FsmReplan()=default;
+    FsmReplan() = default;
     explicit FsmReplan(const PlannerConfig& planner_config) {
         planner_config_ = planner_config;
         path_planning.set_param(planner_config_.path_planning_params);
     }
-    enum PathError {
-        NONE,
-        SUCCESS,
+
+private:
+    enum PathState {
+        SUCCESSED,
         FAILED,
+        IDLE,
+    } path_state_ = PathState::IDLE;
+    bool need_replan_ = true;
+    utils::RobotState old_goal_pose_;
+    std::vector<Eigen::Vector2d> last_opt_path_;
+    struct ResultPath {
+        path_planning::PathPostProcessing::Trajectory planning_traj;
+        Trajectory<5, 2> opt_traj;
+        PathState path_state;
     };
-    using path = tl::expected<std::pair<path_planning::PathPostProcessing::Trajectory,Trajectory<5, 2>>, PathError>;
+    ResultPath result_;
+
+public:
+    enum PathError {
+        PLANNING_FAILED,
+        MINCO_OPT_FIALED,
+        MAX_RETRIES,
+    };
+
+    using path = tl::expected<ResultPath, PathError>;
     auto plan(
         const utils::RobotState& goal_pose,
         const utils::RobotState& current_pose,
         std::shared_ptr<grid_map::GridMap> grid_map
     ) -> path {
-        utils::TimeConsuming timer("planner_fsm", true); // true 表示允许打印
-        path_planning.set_map(*grid_map);
-        Eigen::Vector2d start(current_pose.p.x(), current_pose.p.y());
-        Eigen::Vector2d goal(goal_pose.p.x(), goal_pose.p.y());
-        //logger::fsm_replan->info("start planning");
-        path_planning.set_use_jps(true);
-        auto trajectory=path_planning.path_planning(start, goal, 5000);
-        if(!trajectory.has_value()){
-            logger::fsm_replan->info("planning failed");
-            return tl::make_unexpected(PathError::FAILED);
+        
+        // 起点≈终点（机器人已到达目标附近）：直接退出，不规划。
+        if ((current_pose.p.head<2>() - goal_pose.p.head<2>()).norm()
+            < planner_config_.replan_params.goal_reached_radius) {
+            path_state_ = PathState::SUCCESSED;
+            result_.path_state = path_state_;
+            return result_;
         }
-        utils::TimeConsuming timer_("MINCO", true); // true 表示允许打印
-        // MINCO 五阶轨迹优化(时间 + 平滑 + ESDF 避障 + 速度/加速度软约束)。
-        // 优化失败或安全检查不过时保持 path_planning 原始轨迹,安全兜底。
-        auto traj = trajectory.value();
-        auto  minco_path = minco_optimize(traj, grid_map, current_pose);
-        if(!minco_path){
-            return tl::make_unexpected(PathError::FAILED);
+        const auto safe_threshold = planner_config_.path_planning_params.safe_threshold;
+        // 触发重规划的三个条件（满足任一即重规划）：
+        //   1. 路径碰障（A* 原始网格路径 + 优化后航点路径，见 checkCollision）
+        //   2. 路径年龄超过 replan_interval_
+        //   3. 机器人偏离参考路径超过 replan_lateral_dev_
+        Eigen::Vector2d diff = (old_goal_pose_.p - goal_pose.p).head<2>();
+        Eigen::Vector2d threshold = planner_config_.replan_params.goal_deviation.head<2>();
+        if (diff.cwiseAbs().x() > threshold.x() && diff.cwiseAbs().y() > threshold.y()) {
+            // 任一轴超出阈值即触发重规划
+            need_replan_ = true;
         }
-        return std::make_pair(traj, minco_path.value());
-    };
+        //路径碰障（jps优化后航点路径)
+        const bool path_collision = result_.planning_traj.optimized_path.empty()
+            || check_collision(result_.planning_traj, *grid_map, safe_threshold);
+        if (path_collision) {
+            need_replan_ = true;
+        }
+
+        //机器人偏离参考路径超过 replan_lateral_dev_
+        const double lateral_dev = lateral_deviation(
+            Eigen::Vector2d(current_pose.p.x(), current_pose.p.y()),
+            last_opt_path_.empty() ? result_.planning_traj.optimized_path : last_opt_path_
+        );
+
+        if (lateral_dev > planner_config_.replan_params.replan_lateral_dev) {
+            need_replan_ = true;
+        }
+        // 暂时不考虑加入 路径年龄超过 replan_interval_
+        if (need_replan_) {
+            utils::TimeConsuming timer("planner_fsm", false); // true 表示允许打印
+            path_planning.set_map(*grid_map);
+
+            Eigen::Vector2d start(current_pose.p.x(), current_pose.p.y());
+            Eigen::Vector2d goal(goal_pose.p.x(), goal_pose.p.y());
+
+            // 若起点/终点过于靠近障碍物，沿 ESDF 梯度外推到安全点，保证可规划
+            start = get_safe_pos(start, *grid_map, safe_threshold);
+            goal = get_safe_pos(goal, *grid_map, safe_threshold);
+
+            path_planning.set_use_jps(true);
+
+            auto trajectory = path_planning.path_planning(start, goal, 5000);
+            if (!trajectory.has_value()) {
+                logger::fsm_replan->info("planning failed");
+                need_replan_=true;
+                return tl::make_unexpected(PathError::PLANNING_FAILED);
+            }
+
+            // MINCO 五阶轨迹优化(时间 + 平滑 + ESDF 避障 + 速度/加速度软约束)。
+            // 优化失败或安全检查不过时保持 path_planning 原始轨迹,安全兜底。
+            result_.planning_traj = trajectory.value();
+            // [临时诊断] 打印 raw_path / optimized_path 点数,确认直线/近距离时的短路情况
+            logger::fsm_replan->info(
+                "path points: raw={} optimized={} total_time={:.2f}s",
+                result_.planning_traj.raw_path.size(),
+                result_.planning_traj.optimized_path.size(),
+                result_.planning_traj.total_time
+            );
+
+            auto minco_path = minco_optimize(result_.planning_traj, grid_map, current_pose);
+            if (!minco_path) {
+                need_replan_=true;
+                return tl::make_unexpected(PathError::MINCO_OPT_FIALED);
+            }
+            result_.path_state = PathState::SUCCESSED;
+            old_goal_pose_ = goal_pose;
+            last_opt_path_ = sample_minco_trajectory(minco_path.value(), 0.02);
+            result_.opt_traj = minco_path.value();
+            need_replan_=false;
+            return result_;
+        }
+        return result_;
+    }
 
 private:
-    
+    // 将过于靠近障碍物的点沿 ESDF 梯度外推到安全距离，确保 A*/碰撞检测可通过
+    auto get_safe_pos(const Eigen::Vector2d& pos, const grid_map::GridMap& grid_map, const double& safe_threshold)
+        -> Eigen::Vector2d;
+    auto check_point_equal(const Eigen::Vector3d& pos1, const Eigen::Vector3d& pos2, const Eigen::Vector3d& deviation)
+        -> bool;
+    auto check_collision(
+        path_planning::PathPostProcessing::Trajectory traj,
+        const grid_map::GridMap& grid_map,
+        const double& safe_threshold
+    ) -> bool;
+    auto lateral_deviation(const Eigen::Vector2d& pos, const std::vector<Eigen::Vector2d>& path) -> double;
+    auto sample_minco_trajectory(Trajectory<5, 2> spline, const double dt_check) -> std::vector<Eigen::Vector2d>;
+
+private:
     path_planning::PathPlanning path_planning;
     minco_opt::MincoOptimizer minco_; // MINCO 五阶优化器(非线程安全,单线程调用)
-    enum MincoError{
-        FAIL
-    };
+    enum MincoError { OPTFAIL };
     // MINCO 轨迹优化:成功返回 true 并原地更新 traj;失败返回 false,traj 保持原样。
     auto minco_optimize(
         path_planning::PathPostProcessing::Trajectory& traj,
         std::shared_ptr<grid_map::GridMap> grid_map,
-        const utils::RobotState& current_pose) -> tl::expected<Trajectory<5, 2>,MincoError>;
+        const utils::RobotState& current_pose
+    ) -> tl::expected<Trajectory<5, 2>, MincoError>;
 
     // 把优化后的五阶样条采样回填到 Trajectory(下游 MPC/可视化格式不变)。
     auto rebuild_optimized_trajectory(
         path_planning::PathPostProcessing::Trajectory& traj,
         const Trajectory<5, 2>& spline,
-        const path_planning::PathPostProcessing::PathPostProcessingParams& pp_params) -> void;
-    
+        const path_planning::PathPostProcessing::PathPostProcessingParams& pp_params
+    ) -> void;
 };
-
-// ======================= MINCO 优化接线(类外内联实现) =======================
-// 注意:定义在头文件中的类外成员函数必须显式 inline,避免多 TU 包含时重复定义。
-
-inline auto FsmReplan::minco_optimize(
-    path_planning::PathPostProcessing::Trajectory& traj,
-    std::shared_ptr<grid_map::GridMap> grid_map,
-    const utils::RobotState& current_pose) -> tl::expected<Trajectory<5, 2>,MincoError> {
-    if (!grid_map) return tl::make_unexpected(MincoError::FAIL);
-    const auto& pp_params = planner_config_.path_planning_params;
-
-    // 航点太少没有优化意义(至少 4 个点才有 3 段)
-    if (traj.optimized_path.size() < 4) return tl::make_unexpected(MincoError::FAIL);;
-
-    // 段数 N:最多 6 段(决策维 = 2(N-1)+N),首尾航点固定
-    const int N = std::min(6, static_cast<int>(traj.optimized_path.size()) - 1);
-    if (N < 2) return tl::make_unexpected(MincoError::FAIL);;
-
-    // ① 子采样 N+1 个航点(首尾 = 起点/终点)
-    std::vector<Eigen::Vector2d> pts;
-    pts.reserve(static_cast<size_t>(N) + 1);
-    const int M = static_cast<int>(traj.optimized_path.size()) - 1;
-    for (int i = 0; i <= N; ++i) {
-        const int idx = static_cast<int>(std::lround(static_cast<double>(i) * M / N));
-        pts.push_back(traj.optimized_path[static_cast<size_t>(std::clamp(idx, 0, M))]);
-    }
-
-    // ② 初始路点(2 x (N-1))
-    Eigen::Matrix2Xd init_points(2, N - 1);
-    for (int i = 0; i < N - 1; ++i) {
-        init_points.col(i) = pts[static_cast<size_t>(i + 1)];
-    }
-
-    // ③ 初始时间:均匀分配 path_planning 的总时间(暂不考虑重规划热启动)
-    const double total_T = std::max(traj.total_time, 0.5);
-    Eigen::VectorXd init_times(N);
-    for (int i = 0; i < N; ++i) init_times(i) = total_T / N;
-
-    // ④ PVA 边界(行 = x/y,列 = P/V/A):起点速度取当前速度,终点静止
-    Eigen::Matrix<double, 2, 3> head_pva, tail_pva;
-    head_pva << traj.start_state_XYTheta.x(), current_pose.v.x(), 0.0,
-                traj.start_state_XYTheta.y(), current_pose.v.y(), 0.0;
-    tail_pva << traj.final_state_XYTheta.x(), 0.0, 0.0,
-                traj.final_state_XYTheta.y(), 0.0, 0.0;
-
-    // ⑤ 优化器配置(权重先用合理默认值,后续可挪到 yaml)
-    minco_opt::MincoOptimizerConfig cfg;
-    cfg.weight_smooth = 1.0;          // jerk 平滑
-    cfg.weight_obstacle = 100.0;      // ESDF 避障
-    cfg.weight_feasibility = 10.0;    // 速度/加速度可行性
-    cfg.weight_time = 10.0;           // 时间正则
-    cfg.weight_mean_time = 10.0;      // 平均时间约束
-    cfg.max_vel = pp_params.max_vel;
-    cfg.max_acc = pp_params.max_acc;
-    cfg.safe_distance = pp_params.safe_threshold;
-    cfg.integral_resolution = 8;      // 每段避障/可行性采样点数
-    cfg.max_iterations = 100;
-    cfg.g_epsilon = 1e-4;
-    cfg.min_time = 0.1;
-
-    // ⑥ 执行优化(每次重建 ESDF 适配器;MincoOptimizer 非线程安全,单线程使用)
-    minco_.setESDFInterface(std::make_shared<minco_opt::GridMapESDF>(grid_map));
-    minco_.setConfig(cfg);
-    minco_.initialize(head_pva, tail_pva, N);
-    if (!minco_.optimize(init_points, init_times)) {
-        logger::fsm_replan->warn("MINCO optimize failed, keep raw trajectory");
-        return tl::make_unexpected(MincoError::FAIL);;
-    }
-
-    Trajectory<5, 2> spline;
-    minco_.getTrajectory(spline);
-
-    // ⑦ 密集采样安全检查:净空 / 速度 / 加速度,任一超限 -> 回退原始轨迹
-    const double hard_clearance = planner_config_.replan_params.hard_clearance;
-    const double vel_lim = cfg.max_vel * 1.05;
-    const double acc_lim = cfg.max_acc * 1.05;
-    const double dt_check = 0.02;
-    for (int i = 0; i < spline.getPieceNum(); ++i) {
-        const auto& piece = spline[i];
-        const double dur = piece.getDuration();
-        for (double t = 0.0; t <= dur; t += dt_check) {
-            const Eigen::Vector2d p = piece.getPos(t);
-            if (!grid_map->isInsideMap(p) || grid_map->getDistance(p) < hard_clearance) {
-                logger::fsm_replan->warn(
-                    "MINCO traj unsafe (clearance {:.3f} < {:.3f}), keep raw trajectory",
-                    grid_map->getDistance(p), hard_clearance);
-                return tl::make_unexpected(MincoError::FAIL);;
-            }
-            if (piece.getVel(t).norm() > vel_lim || piece.getAcc(t).norm() > acc_lim) {
-                logger::fsm_replan->warn("MINCO traj unsafe (vel/acc), keep raw trajectory");
-                return tl::make_unexpected(MincoError::FAIL);;
-            }
-        }
-    }
-
-    return spline;
-}
 } // namespace replan

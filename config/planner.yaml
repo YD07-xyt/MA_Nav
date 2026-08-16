@@ -10,37 +10,29 @@ map:
   mapping_model: false   # true 建图模式，false 规划模式
 
 planner_config:
-  opt_params:
-    total_time: 10.0
-    piece_num: 0
-    piece_len: 1.0
-    max_pieces: 40
-    rho_energy: 5.0
-    rho_T: 100.0
-    rho_obs: 1000.0
-    safe_threshold: 0.45
-    max_v: 3.0
-    rho_v: 100.0
-    max_a: 3.0
-    rho_a: 50.0
-    max_j: 0.0
-    rho_j: 0.0
-    int_K: 32
-    check_gradient: false
-    mem_size: 256
-    max_iter: 10000
-    past: 3
-    g_epsilon: 1e-6
-    delta: 1e-5
-    min_step: 1e-32
+  minco_opt_params:
+    weight_smooth: 1.0
+    weight_obstacle: 100.0
+    weight_feasibility: 10.0
+    weight_time: 10.0
+    weight_mean_time: 10.0
+    max_vel: 2.0
+    max_acc: 2.0
+    safe_distance: 0.45
+    mean_time_lower_bound: 0.9
+    mean_time_upper_bound: 1.1
+    integral_resolution: 8
+    max_iterations: 200
+    g_epsilon: 1e-4
+    min_time: 0.1
 
   replan_params:
-    deviation: [0.0, 0.0, 0.0]
+    deviation: [0.2, 0.2, 0.0]
     replan_interval: 2.0
     replan_lateral_dev: 0.5
     min_replan_interval: 0.5
     goal_reached_radius: 0.3
-    hard_clearance: 0.3
+    hard_clearance: 0.2
 
   path_planning_params:
     safe_threshold: 0.4
@@ -48,11 +40,9 @@ planner_config:
     max_acc: 3.0
     time_resolution: 0.1
     min_traj_num: 5
-    traj_cut_length: 0.5
+    traj_cut_length: 10
     distance_weight: 1.0
     yaw_weight: 0.5
-    start_vel: 0.0
-    end_vel: 0.0
 
 lmpc_param:
   N: 20

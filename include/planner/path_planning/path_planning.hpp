@@ -15,15 +15,18 @@ public:
         astar_.set_safe_threshold(params.safe_threshold);
         jps_.set_safe_threshold(params.safe_threshold);
         post_processing_.set_params(params);
-
     }
+    auto set_vel(const double& start_vel,const double& end_vel){
+        post_processing_.set_start_vel(start_vel);
+        post_processing_.set_end_vel(end_vel);
+    };
     // 选择底层图搜索算法:默认 A*,开启后改用 JPS(空旷/稀疏障碍下快一个数量级)
     auto set_use_jps(bool use_jps) -> void {
         use_jps_ = use_jps;
     }
     auto path_planning(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, int timeout_ms)
         -> std::optional<PathPostProcessing::Trajectory> {
-        utils::TimeConsuming timer("Planning", true); // true 表示允许打印
+        utils::TimeConsuming timer("Planning",false); // true 表示允许打印
 
         PathPostProcessing::Trajectory traj;
 

@@ -1,27 +1,3 @@
-/*
-    MIT License
-
-    Copyright (c) 2025 Senming Tan (senmingtan5@gmail.com)
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to
-   deal in the Software without restriction, including without limitation the
-   rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-   sell copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in
-   all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-   IN THE SOFTWARE.
-*/
-
 #include "planner/path_planning/jps.h"
 #include "utils/logger.hpp"
 
@@ -37,7 +13,7 @@
 namespace path_planning {
 
 namespace {
-constexpr double kSqrt2 = 1.4142135623730951; // 对角步长(栅格单位)
+constexpr double K_SQRT2 = 1.4142135623730951; // 对角步长(栅格单位)
 }
 
 JPS::JPS(grid_map::GridMap& map, double safe_threshold): map_(map), safe_threshold_(safe_threshold) {
@@ -89,7 +65,7 @@ auto JPS::heuristic_cells(int dx, int dy) -> double {
     dy = std::abs(dy);
     const int mn = std::min(dx, dy);
     const int mx = std::max(dx, dy);
-    return static_cast<double>(mx) + (kSqrt2 - 1.0) * static_cast<double>(mn);
+    return static_cast<double>(mx) + (K_SQRT2 - 1.0) * static_cast<double>(mn);
 }
 
 auto JPS::has_forced_neighbor(int x, int y, int dx, int dy) const -> bool {
@@ -348,7 +324,7 @@ auto JPS::jps_search(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, 
             if (closed_gen_[jlin] == gen) continue; // 一致启发 -> 已展开节点不可能再被改进
 
             const int steps = std::max(std::abs(jp.x() - x), std::abs(jp.y() - y));
-            const double step_cost = (dx != 0 && dy != 0) ? kSqrt2 : 1.0;
+            const double step_cost = (dx != 0 && dy != 0) ? K_SQRT2 : 1.0;
             const double tentative_g = g_score_[lin] + static_cast<double>(steps) * step_cost;
 
             const double old_g = (open_gen_[jlin] == gen)

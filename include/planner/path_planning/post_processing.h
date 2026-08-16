@@ -63,6 +63,12 @@ public:
     auto set_map(const grid_map::GridMap& map) -> void {
         map_ = map;
     };
+    auto set_start_vel(const double& start_vel)->void{
+        params_.start_vel=start_vel;
+    }
+    auto set_end_vel(const double& end_vel)->void{
+        params_.end_vel=end_vel;
+    }
     auto set_params(const PathPostProcessingParams& params)->void{
         params_=params;
     }

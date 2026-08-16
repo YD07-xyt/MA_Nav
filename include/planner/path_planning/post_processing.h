@@ -33,6 +33,8 @@ public:
         Eigen::Vector3d final_state_XYTheta = Eigen::Vector3d::Zero(); // Final pose
 
         // Path characteristics
+        Eigen::VectorXd time_segments;
+
         double total_time = 0; // Total time
         double total_length = 0; // Total length
         double weighted_length = 0; // Weighted length (considering angle changes)

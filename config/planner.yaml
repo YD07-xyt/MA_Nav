@@ -1,59 +1,79 @@
+# ==================== ROS2 话题 / 路径配置 ====================
 ros2:
-  map_topic_name: "/lio/cloud_world"
-  target_topic_name: "/goal_pose"
-  clickedPoint_topic_name: "/clicked_point"
-  odom_topic_name: "/lio/base_odom"
-  map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"
-  global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm"
+  map_topic_name: "/lio/cloud_world"          # 点云地图话题，用于实时建图/更新
+  target_topic_name: "/goal_pose"             # 目标点话题，rviz 下发目标
+  clickedPoint_topic_name: "/clicked_point"   # rviz 点选话题，用于画区域等
+  odom_topic_name: "/lio/base_odom"           # 里程计话题，提供位置/速度/姿态
+  map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"   # 地图参数
+  global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm" # 全局栅格地图
 
+# ==================== 地图模式 ====================
 map:
-  mapping_model: false   # true 建图模式，false 规划模式
+  mapping_model: false   # true=建图模式，false=规划模式
 
+# ==================== 规划器配置 ====================
 planner_config:
+
+  # ---------- MINCO 轨迹优化参数 ----------
   minco_opt_params:
-    weight_smooth: 1.0
-    weight_obstacle: 100.0
-    weight_feasibility: 10.0
-    weight_time: 10.0
-    weight_mean_time: 10.0
-    max_vel: 2.0
-    max_acc: 2.0
-    safe_distance: 0.45
-    mean_time_lower_bound: 0.9
-    mean_time_upper_bound: 1.1
-    integral_resolution: 8
-    max_iterations: 200
-    g_epsilon: 1e-4
-    min_time: 0.1
+    weight_smooth: 5.0        # 平滑代价权重：越大轨迹越平滑，可抑制过弯振荡；
+                              # 但太大会过度拉直，可能切弯/靠近障碍物
+    weight_obstacle: 1000.0    # 避障代价权重：越大越远离障碍物；
+                              # 太大可能导致轨迹在窄缝中过于保守
+    weight_feasibility: 40.0  # 速度/加速度可行性软约束权重：
+                              # 越大越不容易超速/超加速度
+    weight_time: 20.0         # 时间代价权重：越大总时间越短、速度越快；
+                              # 但太大会把时间压得过短，可能触发速度/加速度极限
+    weight_mean_time: 40.0    # 平均时间约束权重：让各段时间不要过于不均匀，
+                              # 防止某一段特别慢或特别快
+    max_vel: 3.0              # MINCO 最大速度 (m/s)，轨迹速度软约束上限
+    max_acc: 3.0              # MINCO 最大加速度 (m/s²)，轨迹加速度软约束上限
+    safe_distance: 0.4       # MINCO 避障安全距离 (m)，轨迹离障碍物至少保持这个距离
+    mean_time_lower_bound: 0.9  # 平均时间下界比例：每段不得短于平均时间的 0.9 倍
+    mean_time_upper_bound: 1.1  # 平均时间上界比例：每段不得长于平均时间的 1.1 倍
+    integral_resolution: 8      # 每段轨迹积分采样点数：越大避障/可行性评估越精细，但更慢
+    max_iterations: 8000         # L-BFGS 最大迭代次数
+    g_epsilon: 1e-4             # 梯度收敛阈值，越小优化越精细
+    min_time: 0.1               # 最小段时间 (s)，防止某段被优化得过短
 
+  # ---------- 重规划参数 ----------
   replan_params:
-    deviation: [0.2, 0.2, 0.0]
-    replan_interval: 2.0
-    replan_lateral_dev: 0.5
-    min_replan_interval: 0.5
-    goal_reached_radius: 0.3
-    hard_clearance: 0.2
+    goal_deviation: [0.2, 0.2, 0.0]   # 目标点变化阈值，超过任一轴就触发重规划
+    #replan_interval: 2.0              # 已注释：按时间强制重规划，暂时不用
+    replan_lateral_dev: 0.5            # 横向偏差阈值 (m)：机器人偏离参考轨迹超过 0.5m 就重规划
+    min_replan_interval: 0.5           # 最小重规划间隔 (s)，防止频繁重规划
+    goal_reached_radius: 0.3           # 到达判定半径 (m)：距目标小于 0.3m 直接认为到达
+    #hard_clearance: 0.2               # 已注释：硬安全距离检查，暂时不用
+    minco_traj_validity_duration: 2.0  # MINCO 轨迹有效期 (s)，超过后不再用旧轨迹做热启动
+    minco_traj_continuity_threshold: 0.3 # 热启动连续性阈值 (m)：
+                                         # 机器人距旧轨迹投影点小于 0.3m 时，用旧轨迹 PVA 热启动
+    projection_search_resolution: 0.02   # 投影点搜索时间分辨率 (s)，越小越精确但计算量越大
 
+  # ---------- 上游路径规划 / 梯形速度规划参数 ----------
   path_planning_params:
-    safe_threshold: 0.4
-    max_vel: 3.0
-    max_acc: 3.0
-    time_resolution: 0.1
-    min_traj_num: 5
-    traj_cut_length: 10
-    distance_weight: 1.0
-    yaw_weight: 0.5
+    safe_threshold: 0.4        # JPS/A* 与后处理的安全距离阈值 (m)
+    max_vel: 3.0               # 梯形速度规划最大速度 (m/s)
+    max_acc: 3.0               # 梯形速度规划最大加速度 (m/s²)
+    time_resolution: 0.3       # 均匀时间重采样间隔 (s)；
+                               # 越小 timed_trajectory 点越密，过弯处越容易密集
+    min_traj_num: 5            # 最少时间分段数，防止轨迹时间过短导致采样点太少
+    traj_cut_length: 10        # 轨迹截断长度阈值 (m)，超过则标记需要截断
+    distance_weight: 1.0       # 路径长度权重，用于梯形速度规划的加权长度计算
+    yaw_weight: 0.5            # 航向变化权重，转弯越多加权长度越大、速度越慢
 
+# ==================== LMPC 控制器参数 ====================
 lmpc_param:
-  N: 20
-  dt: 0.05
-  u_min: [-1.0, -1.0, -0.5]
-  u_max: [1.0, 1.0, 0.5]
-  x_min: [-10.0, -10.0, -3.14]
-  x_max: [10.0, 10.0, 3.14]
-  Q: [1.0, 0.0, 0.0,
-      0.0, 1.0, 0.0,
-      0.0, 0.0, 0.5]
-  R: [0.1, 0.0, 0.0,
-      0.0, 0.1, 0.0,
-      0.0, 0.0, 0.05]
+  N: 20                # MPC 预测步数
+  dt: 0.05             # MPC 控制周期/预测步长 (s)，与 ROS 控制回调周期匹配
+  u_min: [-3.0, -3.0, -1.0]   # 控制量下限 [vx, vy, wz]：
+                               # 线速度 -3.0 m/s，角速度 -1.0 rad/s
+  u_max: [3.0, 3.0, 1.0]      # 控制量上限 [vx, vy, wz]：
+                               # 线速度 3.0 m/s，角速度 1.0 rad/s
+  x_min: [-10.0, -10.0, -3.14] # 状态量下限 [x, y, yaw]
+  x_max: [10.0, 10.0, 3.14]    # 状态量上限 [x, y, yaw]
+  Q: [1.0, 0.0, 0.0,           # 状态权重矩阵 Q（对角）：
+      0.0, 1.0, 0.0,           # x/y 位置权重 1.0，yaw 权重 0.5
+      0.0, 0.0, 0.5]           # 位置权重越大，跟踪越紧；yaw 权重不用太大
+  R: [0.1, 0.0, 0.0,           # 控制权重矩阵 R（对角）：
+      0.0, 0.1, 0.0,           # 线速度控制权重 0.1，角速度控制权重 0.05
+      0.0, 0.0, 0.05]          # R 越小，MPC 控制越激进、速度响应越快

@@ -130,18 +130,33 @@ auto PathPostProcessing::assign_trajectory_timing(Trajectory& traj) -> void {
     }
 
     // Calculate total time (trapezoidal velocity profile, uses actual start/end vel)
-    traj.total_time = evaluate_duration(traj.weighted_length, params_.start_vel, params_.end_vel, params_.max_vel, params_.max_acc);
+    traj.total_time =
+        evaluate_duration(traj.weighted_length, params_.start_vel, params_.end_vel, params_.max_vel, params_.max_acc);
 
     // Sample time points
-    double sample_time =
-        traj.total_time / std::max(static_cast<int>(traj.total_time / params_.time_resolution + 0.5), params_.min_traj_num);
+    int num_segments = std::max(
+        static_cast<int>(traj.total_time / params_.time_resolution + 0.5), 
+        params_.min_traj_num
+    );
+    double sample_time = traj.total_time / num_segments; // Δt
+
+    // 直接生成均匀的段间时间向量
+    traj.time_segments = Eigen::VectorXd::Constant(num_segments, sample_time);
 
     // Generate timed trajectory points
     double accumulated_s = 0;
     size_t state_idx = 0;
 
     for (double t = sample_time; t < traj.total_time - 1e-3; t += sample_time) {
-        double s = evaluate_length(t, traj.weighted_length, traj.total_time, params_.start_vel, params_.end_vel, params_.max_vel, params_.max_acc);
+        double s = evaluate_length(
+            t,
+            traj.weighted_length,
+            traj.total_time,
+            params_.start_vel,
+            params_.end_vel,
+            params_.max_vel,
+            params_.max_acc
+        );
 
         // Find corresponding state
         while (state_idx < traj.path_states.size() - 1 && accumulated_s + traj.path_states[state_idx].delta_s < s) {

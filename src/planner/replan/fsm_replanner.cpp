@@ -1,4 +1,7 @@
 #include "planner/replan/fsm_replanner.h"
+#include "utils/expected.hpp"
+#include "utils/logger.hpp"
+#include "utils/type_utils.hpp"
 namespace replan {
 
 auto FsmReplan::lateral_deviation(const Eigen::Vector2d& pos, const std::vector<Eigen::Vector2d>& path) -> double {
@@ -103,104 +106,533 @@ auto FsmReplan::check_point_equal(
     }
     return false;
 }
+auto FsmReplan::find_projection_on_trajectory(
+    const Trajectory<5, 2>& traj,
+    const Eigen::Vector2d& robot_pos,
+    const std::chrono::system_clock::time_point& traj_start_time,
+    const std::chrono::system_clock::time_point& current_time
+) -> TrajectoryProjectionResult {
+    TrajectoryProjectionResult result;
+
+    // 1. 计算当前相对时间（相对于轨迹起始时间）
+    double elapsed_time = std::chrono::duration<double>(current_time - traj_start_time).count();
+    double total_duration = traj.getTotalDuration();
+
+    // 如果轨迹已经完全过期，返回无效结果
+    if (elapsed_time >= total_duration) {
+        logger::fsm_replan->warn("轨迹已过期: elapsed={:2f} s, duration={:2f} s", elapsed_time, total_duration);
+        return result; // valid = false
+    }
+
+    // 2. 确定搜索范围
+    //    - 起始时间: max(0, elapsed_time) - 已经经过的部分没有参考意义
+    //    - 结束时间: total_duration
+    //    - 考虑到重规划预测时间，稍微向前看一点
+    double search_start = std::max(0.0, elapsed_time);
+    double search_end = total_duration;
+
+    // 如果可搜索范围太小，返回无效
+    if (search_end - search_start < planner_config_.replan_params.projection_search_resolution) {
+        logger::fsm_replan->warn("轨迹剩余时间太短，无法进行投影搜索");
+        return result; // valid = false
+    }
+
+    // 3. 在轨迹上搜索距离机器人最近的投影点
+    //    采用均匀采样搜索，找到最小距离点
+    double min_distance_sq = std::numeric_limits<double>::max();
+    double best_time = search_start;
+
+    // 计算搜索步数
+    int num_samples =
+        static_cast<int>((search_end - search_start) / planner_config_.replan_params.projection_search_resolution) + 1;
+    num_samples = std::max(num_samples, 10); // 至少采样 10 个点
+
+    for (int i = 0; i < num_samples; ++i) {
+        // 计算当前采样时间
+        double t = search_start + (search_end - search_start) * i / (num_samples - 1);
+
+        // 获取轨迹上该时间点的位置
+        Eigen::Vector2d traj_pos = traj.getPos(t);
+
+        // 计算到机器人的距离平方
+        double dist_sq = (traj_pos - robot_pos).squaredNorm();
+
+        // 更新最小距离
+        if (dist_sq < min_distance_sq) {
+            min_distance_sq = dist_sq;
+            best_time = t;
+        }
+    }
+
+    // 4. 局部精细搜索（可选，提高精度）
+    //    在粗搜索结果附近进行更精细的搜索
+    double refine_range = planner_config_.replan_params.projection_search_resolution * 2.0;
+    double refine_start = std::max(search_start, best_time - refine_range);
+    double refine_end = std::min(search_end, best_time + refine_range);
+    double refine_step = planner_config_.replan_params.projection_search_resolution * 0.1;
+
+    for (double t = refine_start; t <= refine_end; t += refine_step) {
+        Eigen::Vector2d traj_pos = traj.getPos(t);
+        double dist_sq = (traj_pos - robot_pos).squaredNorm();
+
+        if (dist_sq < min_distance_sq) {
+            min_distance_sq = dist_sq;
+            best_time = t;
+        }
+    }
+
+    // 5. 填充结果
+    result.valid = true;
+    result.projection_time = best_time;
+    result.distance = std::sqrt(min_distance_sq);
+    result.position = traj.getPos(best_time);
+    result.velocity = traj.getVel(best_time);
+    result.acceleration = traj.getAcc(best_time); // S=3 热启动：获取加速度
+    logger::fsm_replan->info(
+        "轨迹投影结果: t={:3f} s, dist={:3f} m, pos=({:2f}, {:2f}), "
+        "vel=({:2f}, {:2f}), acc=({:2f}, {:2f})",
+        result.projection_time,
+        result.distance,
+        result.position.x(),
+        result.position.y(),
+        result.velocity.x(),
+        result.velocity.y(),
+        result.acceleration.x(),
+        result.acceleration.y()
+    );
+
+    return result;
+}
+
 auto FsmReplan::minco_optimize(
     path_planning::PathPostProcessing::Trajectory& traj,
     std::shared_ptr<grid_map::GridMap> grid_map,
     const utils::RobotState& current_pose
 ) -> tl::expected<Trajectory<5, 2>, MincoError> {
-    utils::TimeConsuming timer_("MINCO", true); // true 表示允许打印
+    auto start_time = std::chrono::steady_clock::now();
+    utils::TimeConsuming timer_("MINCO", true);
     if (!grid_map) return tl::make_unexpected(MincoError::OPTFAIL);
 
-    // 采样源:optimized_path。直线/近距离时可能被短路成 2~3 个点,
-    // 在相邻航点中点等距插值补足(所有点都在原折线上,形状不变;
-    // 用局部副本,不修改输出的 optimized_path)。
-    while (traj.optimized_path.size() == 2) {
-        std::vector<Eigen::Vector2d> tmp;
-        tmp.reserve(traj.optimized_path.size() * 2 - 1);
-        for (size_t i = 0; i + 1 < traj.optimized_path.size(); ++i) {
-            tmp.push_back(traj.optimized_path[i]);
-            tmp.push_back(0.5 * (traj.optimized_path[i] + traj.optimized_path[i + 1])); // 段中点
+    // ========== 初始状态 (Head State) ==========
+    Eigen::Vector2d head_pos;
+    Eigen::Vector2d head_vel;
+    Eigen::Vector2d head_acc = Eigen::Vector2d::Zero();
+    bool use_projection = false;
+
+    if (has_valid_trajectory_) {
+        auto now = std::chrono::system_clock::now();
+        double traj_age = std::chrono::duration<double>(now - last_trajectory_time_).count();
+        if (traj_age < planner_config_.replan_params.minco_traj_validity_duration) {
+            const Eigen::Vector2d& robot_pos = current_pose.p.head<2>();
+            TrajectoryProjectionResult proj =
+                find_projection_on_trajectory(last_trajectory_, robot_pos, last_trajectory_time_, now);
+            if (proj.valid && proj.distance < planner_config_.replan_params.minco_traj_continuity_threshold) {
+                head_pos = proj.position;
+                head_vel = proj.velocity;
+                head_acc = proj.acceleration;
+                use_projection = true;
+            }
         }
-        tmp.push_back(traj.optimized_path.back());
-        traj.optimized_path.swap(tmp);
-    }
-    //if (traj.optimized_path.size() < 4) return tl::make_unexpected(MincoError::OPTFAIL);
-
-    // 段数 N:最多 6 段(决策维 = 2(N-1)+N),首尾航点固定
-    const int N = std::min(6, static_cast<int>(traj.optimized_path.size()) - 1);
-    if (N < 2) return tl::make_unexpected(MincoError::OPTFAIL);
-
-    // ① 子采样 N+1 个航点(首尾 = 起点/终点)
-    std::vector<Eigen::Vector2d> pts;
-    pts.reserve(static_cast<size_t>(N) + 1);
-    const int M = static_cast<int>(traj.optimized_path.size()) - 1;
-    for (int i = 0; i <= N; ++i) {
-        const int idx = static_cast<int>(std::lround(static_cast<double>(i) * M / N));
-        pts.push_back(traj.optimized_path[static_cast<size_t>(std::clamp(idx, 0, M))]);
-    }
-    // 首尾用精确 start/goal(代替栅格中心,避免与 PVA 边界产生小台阶)
-    pts.front() = traj.start_state_XYTheta.head<2>();
-    pts.back() = traj.final_state_XYTheta.head<2>();
-
-    // ② 初始路点(2 x (N-1))
-    Eigen::Matrix2Xd init_points(2, N - 1);
-    for (int i = 0; i < N - 1; ++i) {
-        init_points.col(i) = pts[static_cast<size_t>(i + 1)];
     }
 
-    // ③ 初始时间:均匀分配 path_planning 的总时间(暂不考虑重规划热启动)
-    const double total_T = std::max(traj.total_time, 0.5);
-    Eigen::VectorXd init_times(N);
-    for (int i = 0; i < N; ++i)
-        init_times(i) = total_T / N;
+    if (!use_projection) {
+        head_pos = traj.start_state_XYTheta.head<2>();
+        head_vel = current_pose.v.head<2>();
+        head_acc = Eigen::Vector2d::Zero();
+    }
 
-    // ④ PVA 边界(行 = x/y,列 = P/V/A):起点速度取当前速度,终点静止
-    Eigen::Matrix<double, 2, 3> head_pva, tail_pva;
-    head_pva << traj.start_state_XYTheta.x(), current_pose.v.x(), 0.0, traj.start_state_XYTheta.y(), current_pose.v.y(),
-        0.0;
-    tail_pva << traj.final_state_XYTheta.x(), 0.0, 0.0, traj.final_state_XYTheta.y(), 0.0, 0.0;
+    // ========== 方案 B：optimized_path 关键点 + timed_trajectory 补点 ==========
 
-    // ⑥ 执行优化(每次重建 ESDF 适配器;MincoOptimizer 非线程安全,单线程使用)
-    minco_.setESDFInterface(std::make_shared<minco_opt::GridMapESDF>(grid_map));
-    minco_.setConfig(planner_config_.minco_opt_params);
-    minco_.initialize(head_pva, tail_pva, N);
-    if (!minco_.optimize(init_points, init_times)) {
-        logger::fsm_replan->warn("MINCO optimize failed, keep raw trajectory");
+    // 1. 关键点骨架：optimized_path 去重
+    std::vector<Eigen::Vector2d> keyPoints;
+    keyPoints.reserve(traj.optimized_path.size());
+    for (const auto& p: traj.optimized_path) {
+        if (keyPoints.empty() || (p - keyPoints.back()).squaredNorm() > 1e-12) {
+            keyPoints.push_back(p);
+        }
+    }
+
+    // 关键点太少时先补中点，保证至少 2 段
+    while (keyPoints.size() == 2) {
+        std::vector<Eigen::Vector2d> tmp;
+        tmp.reserve(keyPoints.size() * 2 - 1);
+        for (size_t i = 0; i + 1 < keyPoints.size(); ++i) {
+            tmp.push_back(keyPoints[i]);
+            tmp.push_back(0.5 * (keyPoints[i] + keyPoints[i + 1]));
+        }
+        tmp.push_back(keyPoints.back());
+        keyPoints.swap(tmp);
+    }
+
+    if (keyPoints.size() < 2) {
         return tl::make_unexpected(MincoError::OPTFAIL);
     }
 
-    Trajectory<5, 2> spline;
-    minco_.getTrajectory(spline);
+    const double traj_T = traj.total_time > 1e-6 ? traj.total_time : 0.5;
 
-    // ⑦ 密集采样安全检查:净空 / 速度 / 加速度,任一超限 -> 回退原始轨迹
-    const double hard_clearance = planner_config_.replan_params.hard_clearance;
-    const double vel_lim = planner_config_.minco_opt_params.max_vel * 1.05;
-    const double acc_lim = planner_config_.minco_opt_params.max_acc * 1.05;
-    const double dt_check = 0.02;
-    for (int i = 0; i < spline.getPieceNum(); ++i) {
-        const auto& piece = spline[i];
-        const double dur = piece.getDuration();
-        for (double t = 0.0; t <= dur; t += dt_check) {
-            const Eigen::Vector2d p = piece.getPos(t);
-            if (!grid_map->isInsideMap(p) || grid_map->getDistance(p) < hard_clearance) {
-                logger::fsm_replan->warn(
-                    "MINCO traj unsafe (clearance {:.3f} < {:.3f}), keep raw trajectory",
-                    grid_map->getDistance(p),
-                    hard_clearance
-                );
-                return tl::make_unexpected(MincoError::OPTFAIL);
-                ;
-            }
-            if (piece.getVel(t).norm() > vel_lim || piece.getAcc(t).norm() > acc_lim) {
-                logger::fsm_replan->warn("MINCO traj unsafe (vel/acc), keep raw trajectory");
-                return tl::make_unexpected(MincoError::OPTFAIL);
-                ;
+    // 2. 从 timed_trajectory 按时间插值取点
+    auto sampleTimedPosition = [&](double t) -> Eigen::Vector2d {
+        if (t <= 0.0) return traj.start_state_XYTheta.head<2>();
+        if (t >= traj_T - 1e-9) return traj.final_state_XYTheta.head<2>();
+
+        const auto& tp = traj.timed_trajectory;
+        if (tp.empty()) return keyPoints.front();
+
+        size_t idx = 0;
+        while (idx < tp.size() && tp[idx].time < t)
+            ++idx;
+
+        if (idx == 0) {
+            const Eigen::Vector2d p0 = traj.start_state_XYTheta.head<2>();
+            const Eigen::Vector2d p1 = tp.front().state.head<2>();
+            const double t0 = 0.0;
+            const double t1 = tp.front().time;
+            if (t1 - t0 < 1e-9) return p1;
+            return p0 + ((t - t0) / (t1 - t0)) * (p1 - p0);
+        }
+        if (idx >= tp.size()) {
+            const Eigen::Vector2d p0 = tp.back().state.head<2>();
+            const Eigen::Vector2d p1 = traj.final_state_XYTheta.head<2>();
+            const double t0 = tp.back().time;
+            const double t1 = traj_T;
+            if (t1 - t0 < 1e-9) return p1;
+            return p0 + ((t - t0) / (t1 - t0)) * (p1 - p0);
+        }
+
+        const Eigen::Vector2d p0 = tp[idx - 1].state.head<2>();
+        const Eigen::Vector2d p1 = tp[idx].state.head<2>();
+        const double t0 = tp[idx - 1].time;
+        const double t1 = tp[idx].time;
+        if (t1 - t0 < 1e-9) return p1;
+        return p0 + ((t - t0) / (t1 - t0)) * (p1 - p0);
+    };
+
+    // 3. 给关键点估计一个在 timed_trajectory 上的时间，用于排序和后续补点
+    auto nearestTimedTime = [&](const Eigen::Vector2d& p) -> double {
+        if (traj.timed_trajectory.empty()) return 0.0;
+        double bestTime = 0.0;
+        double bestDist = std::numeric_limits<double>::max();
+        for (const auto& tp: traj.timed_trajectory) {
+            const double d = (tp.state.head<2>() - p).squaredNorm();
+            if (d < bestDist) {
+                bestDist = d;
+                bestTime = tp.time;
             }
         }
+        if ((p - traj.start_state_XYTheta.head<2>()).squaredNorm() < 1e-6) return 0.0;
+        if ((p - traj.final_state_XYTheta.head<2>()).squaredNorm() < 1e-6) return traj_T;
+        return bestTime;
+    };
+
+    std::vector<Eigen::Vector2d> pts = keyPoints;
+
+    // 首尾精确化
+    if (!pts.empty()) {
+        pts.front() = use_projection ? head_pos : traj.start_state_XYTheta.head<2>();
+        pts.back() = traj.final_state_XYTheta.head<2>();
     }
 
-    return spline;
+    if (pts.size() < 3) {
+        return tl::make_unexpected(MincoError::OPTFAIL);
+    }
+
+    const int N = static_cast<int>(pts.size()) - 1;
+    const double total_T = std::max(traj.total_time, 0.5);
+    Eigen::VectorXd initialTimes = Eigen::VectorXd::Constant(N, total_T / N);
+
+    // ========== PVA 边界 ==========
+    Eigen::Matrix<double, 2, 3> headPVA, tailPVA;
+    tailPVA.col(0) = traj.final_state_XYTheta.head<2>();
+    tailPVA.col(1) = Eigen::Vector2d::Zero();
+    tailPVA.col(2) = Eigen::Vector2d::Zero();
+    headPVA.col(0) = head_pos;
+    headPVA.col(1) = head_vel;
+    headPVA.col(2) = head_acc;
+
+    // ========== 内部路点 ==========
+    Eigen::Matrix2Xd innerPoints(2, N - 1);
+    for (int i = 0; i < N - 1; ++i) {
+        innerPoints.col(i) = pts[static_cast<size_t>(i + 1)];
+    }
+
+    // ========== 执行优化 ==========
+    minco_.setESDFInterface(std::make_shared<minco_opt::GridMapESDF>(grid_map));
+    minco_.setConfig(planner_config_.minco_opt_params);
+    minco_.initialize(headPVA, tailPVA, N);
+
+    auto elapsed = std::chrono::steady_clock::now() - start_time;
+    const double max_time = 2.0;
+    if (elapsed > std::chrono::duration<double>(max_time)) {
+        return tl::make_unexpected(MincoError::TIMEDOUT);
+    }
+
+    if (!minco_.optimize(innerPoints, initialTimes)) {
+        return tl::make_unexpected(MincoError::OPTFAIL);
+    }
+
+    // 获取优化后的轨迹
+    Trajectory<5, 2> optimizedTraj;
+    minco_.getTrajectory(optimizedTraj);
+
+    // ========== 打印 MINCO 路径和速度统计 ==========
+    {
+        const double dt_log = 0.02;
+        double max_spd = 0.0;
+        double min_spd = std::numeric_limits<double>::max();
+        double sum_spd = 0.0;
+        int cnt = 0;
+        std::string path_str;
+
+        for (int i = 0; i < optimizedTraj.getPieceNum(); ++i) {
+            const auto& piece = optimizedTraj[i];
+            const double dur = piece.getDuration();
+
+            for (double t = 0.0; t <= dur + 1e-9; t += dt_log) {
+                const Eigen::Vector2d p = piece.getPos(t);
+                const Eigen::Vector2d v = piece.getVel(t);
+                const double spd = v.norm();
+
+                max_spd = std::max(max_spd, spd);
+                min_spd = std::min(min_spd, spd);
+                sum_spd += spd;
+                ++cnt;
+
+                // 只打印前 30 个点，避免日志太长
+                if (cnt <= 30 || cnt % 200 == 0) {
+                    path_str += "(" + std::to_string(p.x()) + "," + std::to_string(p.y()) + ") ";
+                }
+            }
+        }
+
+        if (cnt > 0) {
+            logger::fsm_replan->info(
+                "MINCO path: max_spd={:.3f}, min_spd={:.3f}, avg_spd={:.3f}",
+                max_spd,
+                min_spd,
+                sum_spd / cnt
+            );
+        } else {
+            logger::fsm_replan->warn("MINCO trajectory has no samples");
+        }
+    }
+    last_trajectory_ = optimizedTraj;
+    last_trajectory_time_ = std::chrono::system_clock::now();
+    has_valid_trajectory_ = true;
+    return optimizedTraj;
 }
+// auto FsmReplan::minco_optimize(
+//     path_planning::PathPostProcessing::Trajectory& traj,
+//     std::shared_ptr<grid_map::GridMap> grid_map,
+//     const utils::RobotState& current_pose
+// ) -> tl::expected<Trajectory<5, 2>, MincoError> {
+//     auto start_time = std::chrono::steady_clock::now();
+//     utils::TimeConsuming timer_("MINCO", true);
+//     if (!grid_map) return tl::make_unexpected(MincoError::OPTFAIL);
+
+//     // ========== 初始状态 (Head State) ==========
+//     Eigen::Vector2d head_pos;
+//     Eigen::Vector2d head_vel;
+//     Eigen::Vector2d head_acc = Eigen::Vector2d::Zero();
+//     bool use_projection = false;
+
+//     if (has_valid_trajectory_) {
+//         auto now = std::chrono::system_clock::now();
+//         double traj_age = std::chrono::duration<double>(now - last_trajectory_time_).count();
+//         if (traj_age < planner_config_.replan_params.minco_traj_validity_duration) {
+//             const Eigen::Vector2d& robot_pos = current_pose.p.head<2>();
+//             TrajectoryProjectionResult proj =
+//                 find_projection_on_trajectory(last_trajectory_, robot_pos, last_trajectory_time_, now);
+//             if (proj.valid && proj.distance < planner_config_.replan_params.minco_traj_continuity_threshold) {
+//                 head_pos = proj.position;
+//                 head_vel = proj.velocity;
+//                 head_acc = proj.acceleration;
+//                 use_projection = true;
+//             }
+//         }
+//     }
+
+//     if (!use_projection) {
+//         head_pos = traj.start_state_XYTheta.head<2>();
+//         head_vel = current_pose.v.head<2>();
+//         head_acc = Eigen::Vector2d::Zero();
+//     }
+
+//     // ========== 方案 A：全部使用 timed_trajectory ==========
+//     std::vector<Eigen::Vector2d> pts;
+//     std::vector<double> timePoints;
+//     pts.reserve(traj.timed_trajectory.size() + 2);
+//     timePoints.reserve(traj.timed_trajectory.size() + 2);
+
+//     pts.push_back(traj.start_state_XYTheta.head<2>());
+//     timePoints.push_back(0.0);
+
+//     for (const auto& tp : traj.timed_trajectory) {
+//         Eigen::Vector2d p = tp.state.head<2>();
+//         if ((p - pts.back()).squaredNorm() > 1e-12) {
+//             pts.push_back(p);
+//             timePoints.push_back(tp.time);
+//         }
+//     }
+
+//     Eigen::Vector2d goal = traj.final_state_XYTheta.head<2>();
+//     if ((goal - pts.back()).squaredNorm() > 1e-12) {
+//         pts.push_back(goal);
+//         timePoints.push_back(traj.total_time);
+//     } else {
+//         timePoints.back() = traj.total_time;
+//     }
+
+//     if (pts.size() < 3) {
+//         return tl::make_unexpected(MincoError::OPTFAIL);
+//     }
+
+//     if (use_projection) {
+//         pts.front() = head_pos;
+//     }
+
+//     int N = static_cast<int>(pts.size()) - 1;
+//     Eigen::VectorXd initialTimes(N);
+//     for (int i = 0; i < N; ++i) {
+//         initialTimes(i) = std::max(
+//             timePoints[static_cast<size_t>(i + 1)] - timePoints[static_cast<size_t>(i)],
+//             1e-3
+//         );
+//     }
+
+//     // ========== PVA 边界 ==========
+//     Eigen::Matrix<double, 2, 3> headPVA, tailPVA;
+//     tailPVA.col(0) = traj.final_state_XYTheta.head<2>();
+//     tailPVA.col(1) = Eigen::Vector2d::Zero();
+//     tailPVA.col(2) = Eigen::Vector2d::Zero();
+//     headPVA.col(0) = head_pos;
+//     headPVA.col(1) = head_vel;
+//     headPVA.col(2) = head_acc;
+
+//     // ========== 内部路点 ==========
+//     Eigen::Matrix2Xd innerPoints(2, N - 1);
+//     for (int i = 0; i < N - 1; ++i) {
+//         innerPoints.col(i) = pts[static_cast<size_t>(i + 1)];
+//     }
+
+//     // ========== 执行优化 ==========
+//     minco_.setESDFInterface(std::make_shared<minco_opt::GridMapESDF>(grid_map));
+//     minco_.setConfig(planner_config_.minco_opt_params);
+//     minco_.initialize(headPVA, tailPVA, N);
+
+//     auto elapsed = std::chrono::steady_clock::now() - start_time;
+//     const double max_time = 2.0;
+//     if (elapsed > std::chrono::duration<double>(max_time)) {
+//         return tl::make_unexpected(MincoError::TIMEDOUT);
+//     }
+
+//     if (!minco_.optimize(innerPoints, initialTimes)) {
+//         return tl::make_unexpected(MincoError::OPTFAIL);
+//     }
+
+//     Trajectory<5, 2> optimizedTraj;
+//     minco_.getTrajectory(optimizedTraj);
+//     last_trajectory_ = optimizedTraj;
+//     last_trajectory_time_ = std::chrono::system_clock::now();
+//     has_valid_trajectory_ = true;
+//     return optimizedTraj;
+// }
+// auto FsmReplan::minco_optimize(
+//     path_planning::PathPostProcessing::Trajectory& traj,
+//     std::shared_ptr<grid_map::GridMap> grid_map,
+//     const utils::RobotState& current_pose
+// ) -> tl::expected<Trajectory<5, 2>, MincoError> {
+//     utils::TimeConsuming timer_("MINCO", true); // true 表示允许打印
+//     if (!grid_map) return tl::make_unexpected(MincoError::OPTFAIL);
+
+//     // 采样源:optimized_path。直线/近距离时可能被短路成 2~3 个点,
+//     // 在相邻航点中点等距插值补足(所有点都在原折线上,形状不变;
+//     // 用局部副本,不修改输出的 optimized_path)。
+//     while (traj.optimized_path.size() == 2) {
+//         std::vector<Eigen::Vector2d> tmp;
+//         tmp.reserve(traj.optimized_path.size() * 2 - 1);
+//         for (size_t i = 0; i + 1 < traj.optimized_path.size(); ++i) {
+//             tmp.push_back(traj.optimized_path[i]);
+//             tmp.push_back(0.5 * (traj.optimized_path[i] + traj.optimized_path[i + 1])); // 段中点
+//         }
+//         tmp.push_back(traj.optimized_path.back());
+//         traj.optimized_path.swap(tmp);
+//     }
+
+//     // 段数 N:最多 6 段(决策维 = 2(N-1)+N),首尾航点固定
+//     const int N = std::min(6, static_cast<int>(traj.optimized_path.size()) - 1);
+//     if (N < 2) return tl::make_unexpected(MincoError::OPTFAIL);
+
+//     // ① 子采样 N+1 个航点(首尾 = 起点/终点)
+//     std::vector<Eigen::Vector2d> pts;
+//     pts.reserve(static_cast<size_t>(N) + 1);
+//     const int M = static_cast<int>(traj.optimized_path.size()) - 1;
+//     for (int i = 0; i <= N; ++i) {
+//         const int idx = static_cast<int>(std::lround(static_cast<double>(i) * M / N));
+//         pts.push_back(traj.optimized_path[static_cast<size_t>(std::clamp(idx, 0, M))]);
+//     }
+//     // 首尾用精确 start/goal(代替栅格中心,避免与 PVA 边界产生小台阶)
+//     pts.front() = traj.start_state_XYTheta.head<2>();
+//     pts.back() = traj.final_state_XYTheta.head<2>();
+
+//     // ② 初始路点(2 x (N-1))
+//     Eigen::Matrix2Xd init_points(2, N - 1);
+//     for (int i = 0; i < N - 1; ++i) {
+//         init_points.col(i) = pts[static_cast<size_t>(i + 1)];
+//     }
+
+//     // ③ 初始时间:均匀分配 path_planning 的总时间(暂不考虑重规划热启动)
+//     const double total_T = std::max(traj.total_time, 0.5);
+//     Eigen::VectorXd init_times(N);
+//     for (int i = 0; i < N; ++i)
+//         init_times(i) = total_T / N;
+
+//     // ④ PVA 边界(行 = x/y,列 = P/V/A):起点速度取当前速度,终点静止
+//     Eigen::Matrix<double, 2, 3> head_pva, tail_pva;
+//     head_pva << traj.start_state_XYTheta.x(), current_pose.v.x(), 0.0, traj.start_state_XYTheta.y(), current_pose.v.y(),
+//         0.0;
+//     tail_pva << traj.final_state_XYTheta.x(), 0.0, 0.0, traj.final_state_XYTheta.y(), 0.0, 0.0;
+
+//     // ⑥ 执行优化(每次重建 ESDF 适配器;MincoOptimizer 非线程安全,单线程使用)
+//     minco_.setESDFInterface(std::make_shared<minco_opt::GridMapESDF>(grid_map));
+//     minco_.setConfig(planner_config_.minco_opt_params);
+//     minco_.initialize(head_pva, tail_pva, N);
+//     if (!minco_.optimize(init_points, init_times)) {
+//         logger::fsm_replan->warn("MINCO optimize failed, keep raw trajectory");
+//         return tl::make_unexpected(MincoError::OPTFAIL);
+//     }
+
+//     Trajectory<5, 2> spline;
+//     minco_.getTrajectory(spline);
+
+//     // ⑦ 密集采样安全检查:净空 / 速度 / 加速度,任一超限 -> 回退原始轨迹
+//     const double hard_clearance = planner_config_.replan_params.hard_clearance;
+//     const double vel_lim = planner_config_.minco_opt_params.max_vel * 1.05;
+//     const double acc_lim = planner_config_.minco_opt_params.max_acc * 1.05;
+//     const double dt_check = 0.02;
+//     for (int i = 0; i < spline.getPieceNum(); ++i) {
+//         const auto& piece = spline[i];
+//         const double dur = piece.getDuration();
+//         for (double t = 0.0; t <= dur; t += dt_check) {
+//             const Eigen::Vector2d p = piece.getPos(t);
+//             if (!grid_map->isInsideMap(p) || grid_map->getDistance(p) < hard_clearance) {
+//                 logger::fsm_replan->warn(
+//                     "MINCO traj unsafe (clearance {:.3f} < {:.3f}), keep raw trajectory",
+//                     grid_map->getDistance(p),
+//                     hard_clearance
+//                 );
+//                 return tl::make_unexpected(MincoError::OPTFAIL);
+//                 ;
+//             }
+//             if (piece.getVel(t).norm() > vel_lim || piece.getAcc(t).norm() > acc_lim) {
+//                 logger::fsm_replan->warn("MINCO traj unsafe (vel/acc), keep raw trajectory");
+//                 return tl::make_unexpected(MincoError::OPTFAIL);
+//                 ;
+//             }
+//         }
+//     }
+
+//     return spline;
+// }
 auto FsmReplan::sample_minco_trajectory(Trajectory<5, 2> spline, const double dt_check)
     -> std::vector<Eigen::Vector2d> {
     std::vector<Eigen::Vector2d> sample_trajectory;

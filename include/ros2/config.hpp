@@ -43,10 +43,7 @@ inline Eigen::Matrix3d load_matrix3d(const YAML::Node& node) {
     return mat;
 }
 // 辅助函数：加载 MincoOptimizerConfig
-inline void load_minco_opt_config(
-    const YAML::Node& node,
-    minco_opt::MincoOptimizerConfig& param
-) {
+inline void load_minco_opt_config(const YAML::Node& node, minco_opt::MincoOptimizerConfig& param) {
     if (!node) return;
     if (node["weight_smooth"]) param.weight_smooth = node["weight_smooth"].as<double>();
     if (node["weight_obstacle"]) param.weight_obstacle = node["weight_obstacle"].as<double>();
@@ -67,14 +64,18 @@ inline void load_minco_opt_config(
 // 辅助函数：加载 ReplanParam
 inline void load_replan_param(const YAML::Node& node, replan::FsmReplan::ReplanParam& param) {
     if (!node) return;
-    if (node["deviation"]) param.goal_deviation = load_vector3d(node["deviation"]);
-    if (node["replan_interval"]) param.replan_interval = node["replan_interval"].as<double>();
+    if (node["goal_deviation"]) param.goal_deviation = load_vector3d(node["goal_deviation"]);
+    // if (node["replan_interval"]) param.replan_interval = node["replan_interval"].as<double>();
     if (node["replan_lateral_dev"]) param.replan_lateral_dev = node["replan_lateral_dev"].as<double>();
-    if (node["min_replan_interval"]) param.min_replan_interval = node["min_replan_interval"].as<double>();
+    if (node["minco_traj_validity_duration"])
+        param.minco_traj_validity_duration = node["minco_traj_validity_duration"].as<double>();
     if (node["goal_reached_radius"]) param.goal_reached_radius = node["goal_reached_radius"].as<double>();
-    if (node["hard_clearance"]) param.hard_clearance = node["hard_clearance"].as<double>();
-}
+    //if (node["hard_clearance"]) param.hard_clearance = node["hard_clearance"].as<double>();
+    if (node["minco_traj_continuity_threshold"])
+        param.minco_traj_continuity_threshold = node["minco_traj_continuity_threshold"].as<double>();
+     if (node["projection_search_resolution"]) param.projection_search_resolution = node["projection_search_resolution"].as<double>();
 
+}
 
 // 辅助函数：加载 PathPostProcessingParams
 inline void load_path_post_processing_params(

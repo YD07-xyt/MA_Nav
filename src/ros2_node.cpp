@@ -89,8 +89,11 @@ void GlobalPlanner2d::controller_callback() {
         // spdlog::warn("[controller_callback] no current_XYtheta");
         return;
     }
-    if (!trajectory_.isInitialized()) {
-        // spdlog::warn("轨迹未初始化，等待规划...");
+    // if (!trajectory_.isInitialized()) {
+    //     // spdlog::warn("轨迹未初始化，等待规划...");
+    //     return;
+    // }
+    if (trajectory_.getPieceNum() == 0) {
         return;
     }
     // 距离目标检查（优先）
@@ -115,9 +118,11 @@ void GlobalPlanner2d::controller_callback() {
             }
             geometry_msgs::msg::Twist rot;
             rot.angular.z = w;
+
             cmd_vel_pub_->publish(rot);
             return;
         }
+
         geometry_msgs::msg::Twist stop;
         cmd_vel_pub_->publish(stop);
         logger::ros2->debug("到达目标点，停止控制");
@@ -162,10 +167,18 @@ void GlobalPlanner2d::plan_omni() {
         //std::vector<Eigen::Vector2d> opt_path = opt.sampleTrajectory(0.1);
         visualizer.PubOptPath(path_result.planning_traj.optimized_path);
         std::vector<Eigen::Vector3d> route;
-        for(auto point:path_result.planning_traj.optimized_path){
-            route.emplace_back(point.x(),point.y(),0.0);
+        for (auto point: path_result.planning_traj.optimized_path) {
+            route.emplace_back(point.x(), point.y(), 0.0);
         }
-        visualizer.visualize(path_result.opt_traj,route);
+        visualizer.visualize(path_result.opt_traj, route);
+        // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
+        trajectory_ = path_result.opt_traj;
+
+        if (current_XYTheta.has_value()) {
+            omni_lmpc_.initialize_track(*current_XYTheta, trajectory_);
+        } else {
+            omni_lmpc_.reset_track();
+        }
         // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点(全轨迹搜索),
         // 而不是 reset_track() 清零——清零会让参考回退到起点附近,MPC 急刹减速
         // (update_track_time 搜索窗口只有 [t_track_-0.3, t_track_+3.0],游标为 0 时只搜前 3s)

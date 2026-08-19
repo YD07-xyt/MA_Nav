@@ -2,7 +2,8 @@
 #include "map/grid_map.hpp"
 #include "map/ma_map.hpp"
 // #include "planner/opt/traj_optimizer.hpp"
-#include "planner/traj_optimize/SplineTrajectory/SplineTrajectory.hpp"
+#include "planner/traj_optimize/ma_spline_opt/SplineTrajectory/SplineTrajectory.hpp"
+#include "planner/traj_optimize/ma_spline_opt/optimizer_config.h"
 #include "planner/traj_optimize/minco_opt/gcopter/trajectory.hpp"
 #include "utils/eigen_alias.hpp"
 #include "utils/color_msg_utils.hpp"
@@ -32,6 +33,7 @@ private:
     // the entire trajectory, the mesh of free-space polytopes,
     // the edge of free-space polytopes, and spheres for safety radius
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr routePub;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr yaw_profile_pub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr wayPointsPub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr trajectoryPub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr meshPub;
@@ -56,6 +58,7 @@ public:
 public:
     Visualizer(rclcpp::Node::SharedPtr node): node(node) {
         routePub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/route", 10);
+        yaw_profile_pub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/yaw_profile", 10);
         wayPointsPub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/waypoints", 10);
         trajectoryPub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/trajectory", 10);
         meshPub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/mesh", 10);
@@ -79,9 +82,176 @@ public:
         frontier_pub = node->create_publisher<sensor_msgs::msg::PointCloud2>("/ma_nav/map/frontier", 10);
         mkr_arr_pub = node->create_publisher<visualization_msgs::msg::MarkerArray>("/ma_nav/map/map_bound", 10);
     }
+
+    inline void
+    visualizeYaw(const SplineTrajectory::QuinticSplineND<1>& yaw_spline, const std::string& frame_id = "world") {
+        if (!yaw_spline.isInitialized() || yaw_spline.getNumSegments() <= 0) return;
+
+        visualization_msgs::msg::Marker marker;
+        marker.header.stamp = node->now();
+        marker.header.frame_id = frame_id;
+        marker.ns = "yaw_profile";
+        marker.id = 0;
+        marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.scale.x = 0.05;
+        marker.color.r = 1.0;
+        marker.color.g = 0.8;
+        marker.color.b = 0.0;
+        marker.color.a = 1.0;
+
+        const double start_time = yaw_spline.getStartTime();
+        const double end_time = yaw_spline.getEndTime();
+        const double dt = 0.05;
+
+        for (double t = start_time; t <= end_time + 1e-6; t += dt) {
+            double yaw = yaw_spline.getTrajectory().evaluate(t, 0)(0);
+
+            geometry_msgs::msg::Point p;
+            p.x = t;
+            p.y = yaw;
+            p.z = 0.0;
+            marker.points.push_back(p);
+        }
+
+        yaw_profile_pub->publish(marker);
+    }
+    // 可视化 SplineTrajectory::QuinticSplineND<D>
+    // D=2: (x,y)
+    // D=3: 只画前两维 (x,y)，第三维如果是 yaw 不作为 z 使用
+    template<int D>
+    inline void visualizeSpline(
+        const SplineTrajectory::QuinticSplineND<D>& traj,
+        const std::vector<Eigen::Vector3d>& route,
+        const std::string& frame_id = "world"
+    ) {
+        visualization_msgs::msg::Marker routeMarker, wayPointsMarker, trajMarker;
+
+        // ===================== 公共基础 =====================
+        routeMarker.header.stamp = node->now();
+        routeMarker.header.frame_id = frame_id;
+        routeMarker.pose.orientation.w = 1.0;
+        routeMarker.action = visualization_msgs::msg::Marker::ADD;
+
+        // ===================== 前端路径 route =====================
+        routeMarker.id = 0;
+        routeMarker.type = visualization_msgs::msg::Marker::LINE_LIST;
+        routeMarker.ns = "route";
+        routeMarker.color.r = 1.0;
+        routeMarker.color.g = 0.0;
+        routeMarker.color.b = 0.0;
+        routeMarker.color.a = 1.0;
+        routeMarker.scale.x = 0.1;
+
+        if (route.size() > 0) {
+            bool first = true;
+            Eigen::Vector3d last;
+            for (const auto& it: route) {
+                if (first) {
+                    first = false;
+                    last = it;
+                    continue;
+                }
+
+                geometry_msgs::msg::Point p;
+                p.x = last(0);
+                p.y = last(1);
+                p.z = last(2);
+                routeMarker.points.push_back(p);
+
+                p.x = it(0);
+                p.y = it(1);
+                p.z = it(2);
+                routeMarker.points.push_back(p);
+
+                last = it;
+            }
+
+            routePub->publish(routeMarker);
+        }
+
+        // ===================== 样条路点 =====================
+        wayPointsMarker = routeMarker;
+        wayPointsMarker.points.clear(); // ✅ 关键修复
+        wayPointsMarker.id = -1;
+        wayPointsMarker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+        wayPointsMarker.ns = "waypoints";
+        wayPointsMarker.color.r = 1.0;
+        wayPointsMarker.color.g = 0.0;
+        wayPointsMarker.color.b = 0.0;
+        wayPointsMarker.scale.x = 0.35;
+        wayPointsMarker.scale.y = 0.35;
+        wayPointsMarker.scale.z = 0.35;
+
+        if (traj.isInitialized()) {
+            const auto& wps = traj.getSpacePoints();
+
+            for (int i = 0; i < wps.rows(); ++i) {
+                geometry_msgs::msg::Point p;
+                p.x = wps(i, 0);
+                p.y = wps(i, 1);
+                p.z = 0.0;
+
+                wayPointsMarker.points.push_back(p);
+            }
+
+            wayPointsPub->publish(wayPointsMarker);
+        }
+
+        // ===================== 样条轨迹 =====================
+        trajMarker = routeMarker;
+        trajMarker.points.clear(); // ✅ 关键修复
+        trajMarker.id = 0;
+        trajMarker.type = visualization_msgs::msg::Marker::LINE_LIST;
+        trajMarker.ns = "trajectory";
+        trajMarker.color.r = 0.0;
+        trajMarker.color.g = 0.5;
+        trajMarker.color.b = 1.0;
+        trajMarker.scale.x = 0.3;
+
+        if (traj.isInitialized() && traj.getNumSegments() > 0) {
+            const double start_time = traj.getStartTime();
+            const double end_time = traj.getEndTime();
+            const double dt = 0.05;
+
+            Eigen::Matrix<double, D, 1> last_pos = traj.getTrajectory().evaluate(start_time, 0);
+
+            for (double t = start_time + dt; t <= end_time + 1e-6; t += dt) {
+                Eigen::Matrix<double, D, 1> pos = traj.getTrajectory().evaluate(t, 0);
+
+                geometry_msgs::msg::Point p;
+                p.x = last_pos(0);
+                p.y = last_pos(1);
+                p.z = 0.0;
+                trajMarker.points.push_back(p);
+
+                p.x = pos(0);
+                p.y = pos(1);
+                p.z = 0.0;
+                trajMarker.points.push_back(p);
+
+                last_pos = pos;
+            }
+
+            trajectoryPub->publish(trajMarker);
+        }
+    }
+    inline void visualize(
+        const ma_spline_opt::MAsplineOutput& output,
+        const std::vector<Eigen::Vector3d>& route,
+        const std::string& frame_id = "world"
+    ) {
+        if (output.success && output.xy_spline.isInitialized()) {
+            visualizeSpline(output.xy_spline, route, frame_id);
+        }
+
+        if (output.yaw_spline.isInitialized()) {
+            visualizeYaw(output.yaw_spline, frame_id);
+        }
+    }
     // Visualize the trajectory and its front-end path
     template<int D>
-    inline void visualize(const Trajectory<D,2>& traj, const std::vector<Eigen::Vector3d>& route) {
+    inline void visualize(const Trajectory<D, 2>& traj, const std::vector<Eigen::Vector3d>& route) {
         visualization_msgs::msg::Marker routeMarker, wayPointsMarker, trajMarker;
 
         routeMarker.id = 0;

@@ -1,6 +1,6 @@
 #pragma once
 #include "planner/traj_optimize/minco_opt/gcopter/trajectory.hpp"
-#include "planner/traj_optimize/traj_optimizer.h"
+#include "planner/traj_optimize/ma_spline_opt/traj_optimizer.h"
 #include <Eigen/Core>
 #include <Eigen/Sparse>
 #include <OsqpEigen/Solver.hpp>

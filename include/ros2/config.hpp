@@ -42,6 +42,53 @@ inline Eigen::Matrix3d load_matrix3d(const YAML::Node& node) {
     }
     return mat;
 }
+// 辅助函数：加载 MaSplineOptimizerConfig
+inline void load_ma_spline_opt_config(
+    const YAML::Node& node,
+    ma_spline_opt::MaSplineOptimizerConfig& param)
+{
+    if (!node) return;
+
+    if (node["mode"])
+    {
+        std::string mode = node["mode"].as<std::string>();
+        if (mode == "OMNI_XY")
+            param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY;
+        else if (mode == "OMNI_XY_YAW")
+            param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY_YAW;
+        else if (mode == "OMNI_XY_YAW_JOINT")
+            param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY_YAW_JOINT;
+    }
+
+    if (node["rho_energy"]) param.rho_energy = node["rho_energy"].as<double>();
+    if (node["weight_time"]) param.weight_time = node["weight_time"].as<double>();
+    if (node["weight_mean_time"]) param.weight_mean_time = node["weight_mean_time"].as<double>();
+    if (node["mean_lower"]) param.mean_lower = node["mean_lower"].as<double>();
+    if (node["mean_upper"]) param.mean_upper = node["mean_upper"].as<double>();
+    if (node["min_time"]) param.min_time = node["min_time"].as<double>();
+    if (node["weight_min_time"]) param.weight_min_time = node["weight_min_time"].as<double>();
+
+    if (node["weight_obstacle"]) param.weight_obstacle = node["weight_obstacle"].as<double>();
+    if (node["safe_distance"]) param.safe_distance = node["safe_distance"].as<double>();
+
+    if (node["weight_vel"]) param.weight_vel = node["weight_vel"].as<double>();
+    if (node["weight_acc"]) param.weight_acc = node["weight_acc"].as<double>();
+    if (node["v_max"]) param.v_max = node["v_max"].as<double>();
+    if (node["a_max"]) param.a_max = node["a_max"].as<double>();
+
+    if (node["weight_yaw_vel"]) param.weight_yaw_vel = node["weight_yaw_vel"].as<double>();
+    if (node["weight_yaw_acc"]) param.weight_yaw_acc = node["weight_yaw_acc"].as<double>();
+    if (node["yaw_rate_max"]) param.yaw_rate_max = node["yaw_rate_max"].as<double>();
+    if (node["yaw_acc_max"]) param.yaw_acc_max = node["yaw_acc_max"].as<double>();
+
+    if (node["integral_num_steps"]) param.integral_num_steps = node["integral_num_steps"].as<int>();
+    if (node["num_segments"]) param.num_segments = node["num_segments"].as<int>();
+
+    if (node["max_iterations"]) param.max_iterations = node["max_iterations"].as<int>();
+    if (node["g_epsilon"]) param.g_epsilon = node["g_epsilon"].as<double>();
+    if (node["lbfgs_mem_size"]) param.lbfgs_mem_size = node["lbfgs_mem_size"].as<int>();
+    if (node["lbfgs_delta"]) param.lbfgs_delta = node["lbfgs_delta"].as<double>();
+}
 // 辅助函数：加载 MincoOptimizerConfig
 inline void load_minco_opt_config(const YAML::Node& node, minco_opt::MincoOptimizerConfig& param) {
     if (!node) return;
@@ -99,6 +146,8 @@ inline void load_planner_config(const YAML::Node& node, replan::FsmReplan::Plann
     if (node["replan_params"]) load_replan_param(node["replan_params"], config.replan_params);
     // 新增：加载 minco 优化器参数
     if (node["minco_opt_params"]) load_minco_opt_config(node["minco_opt_params"], config.minco_opt_params);
+    if (node["ma_spline_opt_params"])
+        load_ma_spline_opt_config(node["ma_spline_opt_params"], config.ma_spline_opt_params);
     if (node["path_planning_params"])
         load_path_post_processing_params(node["path_planning_params"], config.path_planning_params);
 }
@@ -121,6 +170,7 @@ struct Config {
     std::string target_topic_name;
     std::string clickedPoint_topic_name;
     std::string odom_topic_name;
+    bool is_minco;
     bool mapping_model; // true: 建图模式，false: 规划模式
     std::string map_params_path;
     std::string global_map_path;
@@ -137,6 +187,7 @@ struct Config {
             odom_topic_name = config["ros2"]["odom_topic_name"].as<std::string>();
             map_params_path = config["ros2"]["map_params_path"].as<std::string>();
             global_map_path = config["ros2"]["global_map_path"].as<std::string>();
+            is_minco = config["ros2"]["is_minco"].as<bool>();
         }
         if (config["map"]) {
             mapping_model = config["map"]["mapping_model"].as<bool>();

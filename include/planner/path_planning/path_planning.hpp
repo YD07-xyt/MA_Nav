@@ -26,7 +26,7 @@ public:
     }
     auto path_planning(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, int timeout_ms)
         -> std::optional<PathPostProcessing::Trajectory> {
-        utils::TimeConsuming timer("Planning",false); // true 表示允许打印
+        utils::TimeConsuming timer("Planning",true); // true 表示允许打印
 
         PathPostProcessing::Trajectory traj;
 

@@ -7,7 +7,7 @@ Panels:
         - /Global Options1
         - /Status1
         - /PointCloud21/Topic1
-        - /rog1
+        - /gcopter1
         - /rog1/3d_inf_occ1/Topic1
         - /rog1/2d_grid_map1/Topic1
       Splitter Ratio: 0.5024310946464539
@@ -163,56 +163,6 @@ Visualization Manager:
           Value: true
         - Class: rviz_default_plugins/Marker
           Enabled: true
-          Name: trajectory
-          Namespaces:
-            trajectory: true
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            Filter size: 10
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /ma_nav/trajectory
-          Value: true
-        - Class: rviz_default_plugins/MarkerArray
-          Enabled: true
-          Name: trajectory
-          Namespaces:
-            {}
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /ma_nav/trajectory_array
-          Value: true
-        - Class: rviz_default_plugins/Marker
-          Enabled: true
-          Name: route
-          Namespaces:
-            {}
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            Filter size: 10
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /ma_nav/route
-          Value: true
-        - Class: rviz_default_plugins/MarkerArray
-          Enabled: true
-          Name: route
-          Namespaces:
-            {}
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /ma_nav/route_array
-          Value: true
-        - Class: rviz_default_plugins/Marker
-          Enabled: true
           Name: spheres
           Namespaces:
             {}
@@ -235,87 +185,6 @@ Visualization Manager:
             History Policy: Keep Last
             Reliability Policy: Reliable
             Value: /ma_nav/spheres_array
-          Value: true
-        - Class: rviz_default_plugins/Marker
-          Enabled: true
-          Name: waypoints
-          Namespaces:
-            waypoints: true
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            Filter size: 10
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /ma_nav/waypoints
-          Value: true
-        - Class: rviz_default_plugins/MarkerArray
-          Enabled: true
-          Name: waypoints
-          Namespaces:
-            {}
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /ma_nav/waypoints_array
-          Value: true
-        - Alpha: 1
-          Buffer Length: 1
-          Class: rviz_default_plugins/Path
-          Color: 26; 95; 180
-          Enabled: true
-          Head Diameter: 0.30000001192092896
-          Head Length: 0.20000000298023224
-          Length: 0.30000001192092896
-          Line Style: Billboards
-          Line Width: 0.05999999865889549
-          Name: opt_path
-          Offset:
-            X: 0
-            Y: 0
-            Z: 0
-          Pose Color: 255; 85; 255
-          Pose Style: None
-          Radius: 0.029999999329447746
-          Shaft Diameter: 0.10000000149011612
-          Shaft Length: 0.10000000149011612
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            Filter size: 10
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /ma_nav/opt_path
-          Value: true
-        - Alpha: 1
-          Buffer Length: 1
-          Class: rviz_default_plugins/Path
-          Color: 25; 255; 0
-          Enabled: true
-          Head Diameter: 0.30000001192092896
-          Head Length: 0.20000000298023224
-          Length: 0.30000001192092896
-          Line Style: Billboards
-          Line Width: 0.029999999329447746
-          Name: global_path
-          Offset:
-            X: 0
-            Y: 0
-            Z: 0
-          Pose Color: 255; 85; 255
-          Pose Style: None
-          Radius: 0.029999999329447746
-          Shaft Diameter: 0.10000000149011612
-          Shaft Length: 0.10000000149011612
-          Topic:
-            Depth: 5
-            Durability Policy: Volatile
-            Filter size: 10
-            History Policy: Keep Last
-            Reliability Policy: Reliable
-            Value: /ma_nav/global_path
           Value: true
         - Alpha: 1
           Autocompute Intensity Bounds: true
@@ -363,6 +232,145 @@ Visualization Manager:
             Reliability Policy: Reliable
             Value: /ma_nav/clicked_regions
           Value: true
+        - Class: rviz_common/Group
+          Displays:
+            - Class: rviz_default_plugins/Marker
+              Enabled: true
+              Name: trajectory
+              Namespaces:
+                trajectory: true
+              Topic:
+                Depth: 5
+                Durability Policy: Volatile
+                Filter size: 10
+                History Policy: Keep Last
+                Reliability Policy: Reliable
+                Value: /ma_nav/trajectory
+              Value: true
+            - Class: rviz_default_plugins/MarkerArray
+              Enabled: true
+              Name: trajectory
+              Namespaces:
+                {}
+              Topic:
+                Depth: 5
+                Durability Policy: Volatile
+                History Policy: Keep Last
+                Reliability Policy: Reliable
+                Value: /ma_nav/trajectory_array
+              Value: true
+            - Class: rviz_default_plugins/Marker
+              Enabled: true
+              Name: waypoints
+              Namespaces:
+                waypoints: true
+              Topic:
+                Depth: 5
+                Durability Policy: Volatile
+                Filter size: 10
+                History Policy: Keep Last
+                Reliability Policy: Reliable
+                Value: /ma_nav/waypoints
+              Value: true
+            - Class: rviz_default_plugins/MarkerArray
+              Enabled: true
+              Name: waypoints
+              Namespaces:
+                {}
+              Topic:
+                Depth: 5
+                Durability Policy: Volatile
+                History Policy: Keep Last
+                Reliability Policy: Reliable
+                Value: /ma_nav/waypoints_array
+              Value: true
+          Enabled: true
+          Name: opt
+        - Class: rviz_common/Group
+          Displays:
+            - Class: rviz_default_plugins/Marker
+              Enabled: true
+              Name: route
+              Namespaces:
+                route: true
+              Topic:
+                Depth: 5
+                Durability Policy: Volatile
+                Filter size: 10
+                History Policy: Keep Last
+                Reliability Policy: Reliable
+                Value: /ma_nav/route
+              Value: true
+            - Class: rviz_default_plugins/MarkerArray
+              Enabled: true
+              Name: route
+              Namespaces:
+                {}
+              Topic:
+                Depth: 5
+                Durability Policy: Volatile
+                History Policy: Keep Last
+                Reliability Policy: Reliable
+                Value: /ma_nav/route_array
+              Value: true
+            - Alpha: 1
+              Buffer Length: 1
+              Class: rviz_default_plugins/Path
+              Color: 26; 95; 180
+              Enabled: true
+              Head Diameter: 0.30000001192092896
+              Head Length: 0.20000000298023224
+              Length: 0.30000001192092896
+              Line Style: Billboards
+              Line Width: 0.05999999865889549
+              Name: opt_path
+              Offset:
+                X: 0
+                Y: 0
+                Z: 0
+              Pose Color: 255; 85; 255
+              Pose Style: None
+              Radius: 0.029999999329447746
+              Shaft Diameter: 0.10000000149011612
+              Shaft Length: 0.10000000149011612
+              Topic:
+                Depth: 5
+                Durability Policy: Volatile
+                Filter size: 10
+                History Policy: Keep Last
+                Reliability Policy: Reliable
+                Value: /ma_nav/opt_path
+              Value: true
+            - Alpha: 1
+              Buffer Length: 1
+              Class: rviz_default_plugins/Path
+              Color: 25; 255; 0
+              Enabled: true
+              Head Diameter: 0.30000001192092896
+              Head Length: 0.20000000298023224
+              Length: 0.30000001192092896
+              Line Style: Billboards
+              Line Width: 0.029999999329447746
+              Name: global_path
+              Offset:
+                X: 0
+                Y: 0
+                Z: 0
+              Pose Color: 255; 85; 255
+              Pose Style: None
+              Radius: 0.029999999329447746
+              Shaft Diameter: 0.10000000149011612
+              Shaft Length: 0.10000000149011612
+              Topic:
+                Depth: 5
+                Durability Policy: Volatile
+                Filter size: 10
+                History Policy: Keep Last
+                Reliability Policy: Reliable
+                Value: /ma_nav/global_path
+              Value: true
+          Enabled: true
+          Name: planning
       Enabled: true
       Name: gcopter
     - Class: rviz_common/Group
@@ -655,8 +663,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 1.9780571460723877
-        Min Value: -0.10030554980039597
+        Max Value: 2.570326328277588
+        Min Value: -0.13171395659446716
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -902,25 +910,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 27.726337432861328
+      Distance: 32.730674743652344
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 3.9783105850219727
-        Y: 1.1047292947769165
-        Z: -12.694347381591797
+        X: 7.10600471496582
+        Y: 0.8213137984275818
+        Z: -13.055243492126465
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.4347964525222778
+      Pitch: 1.3747965097427368
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.142225503921509
+      Yaw: 3.0972251892089844
     Saved: ~
 Window Geometry:
   Displays:

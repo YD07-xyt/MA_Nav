@@ -6,19 +6,49 @@ ros2:
   odom_topic_name: "/lio/base_odom"           # 里程计话题，提供位置/速度/姿态
   map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"   # 地图参数
   global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm" # 全局栅格地图
-
+  is_minco: false
 # ==================== 地图模式 ====================
 map:
   mapping_model: false   # true=建图模式，false=规划模式
 
 # ==================== 规划器配置 ====================
 planner_config:
+    # ---------- MA Spline 轨迹优化参数 ----------
+  ma_spline_opt_params:
+    mode: "OMNI_XY"            # OMNI_XY / OMNI_XY_YAW / OMNI_XY_YAW_JOINT
+    rho_energy: 5.0            # 平滑代价权重
+    weight_time: 20.0          # 时间代价权重
+    weight_mean_time: 40.0     # 平均时间约束权重
+    mean_lower: 0.9            # 平均时间下界比例
+    mean_upper: 1.1            # 平均时间上界比例
+    min_time: 0.1              # 最小段时间 (s)
+    weight_min_time: 100.0     # 最小时间软约束权重
+
+    weight_obstacle: 8000.0    # 避障代价权重
+    safe_distance: 0.3         # 安全距离 (m)
+
+    weight_vel: 40.0           # 速度约束权重
+    weight_acc: 40.0           # 加速度约束权重
+    v_max: 3.0                 # 最大线速度 (m/s)
+    a_max: 5.0                 # 最大线加速度 (m/s²)
+
+    weight_yaw_vel: 10.0       # yaw 角速度约束权重
+    weight_yaw_acc: 5.0        # yaw 角加速度约束权重
+    yaw_rate_max: 1.0          # 最大角速度 (rad/s)
+    yaw_acc_max: 2.0           # 最大角加速度 (rad/s²)
+
+    integral_num_steps: 8      # 每段积分采样点数
+    num_segments: 8            # 优化段数，越小越快
+    max_iterations: 8000        # L-BFGS 最大迭代次数
+    g_epsilon: 1e-4            # 梯度收敛阈值
+    lbfgs_mem_size: 256         # L-BFGS 记忆大小
+    lbfgs_delta: 5e-3          # L-BFGS 增量收敛阈值
 
   # ---------- MINCO 轨迹优化参数 ----------
   minco_opt_params:
     weight_smooth: 5.0        # 平滑代价权重：越大轨迹越平滑，可抑制过弯振荡；
                               # 但太大会过度拉直，可能切弯/靠近障碍物
-    weight_obstacle: 1000.0    # 避障代价权重：越大越远离障碍物；
+    weight_obstacle: 8000.0    # 避障代价权重：越大越远离障碍物；
                               # 太大可能导致轨迹在窄缝中过于保守
     weight_feasibility: 40.0  # 速度/加速度可行性软约束权重：
                               # 越大越不容易超速/超加速度
@@ -27,8 +57,8 @@ planner_config:
     weight_mean_time: 40.0    # 平均时间约束权重：让各段时间不要过于不均匀，
                               # 防止某一段特别慢或特别快
     max_vel: 3.0              # MINCO 最大速度 (m/s)，轨迹速度软约束上限
-    max_acc: 3.0              # MINCO 最大加速度 (m/s²)，轨迹加速度软约束上限
-    safe_distance: 0.4       # MINCO 避障安全距离 (m)，轨迹离障碍物至少保持这个距离
+    max_acc: 5.0              # MINCO 最大加速度 (m/s²)，轨迹加速度软约束上限
+    safe_distance: 0.3       # MINCO 避障安全距离 (m)，轨迹离障碍物至少保持这个距离
     mean_time_lower_bound: 0.9  # 平均时间下界比例：每段不得短于平均时间的 0.9 倍
     mean_time_upper_bound: 1.1  # 平均时间上界比例：每段不得长于平均时间的 1.1 倍
     integral_resolution: 8      # 每段轨迹积分采样点数：越大避障/可行性评估越精细，但更慢
@@ -51,10 +81,10 @@ planner_config:
 
   # ---------- 上游路径规划 / 梯形速度规划参数 ----------
   path_planning_params:
-    safe_threshold: 0.4        # JPS/A* 与后处理的安全距离阈值 (m)
+    safe_threshold: 0.3        # JPS/A* 与后处理的安全距离阈值 (m)
     max_vel: 3.0               # 梯形速度规划最大速度 (m/s)
-    max_acc: 3.0               # 梯形速度规划最大加速度 (m/s²)
-    time_resolution: 0.3       # 均匀时间重采样间隔 (s)；
+    max_acc: 5.0               # 梯形速度规划最大加速度 (m/s²)
+    time_resolution: 0.6      # 均匀时间重采样间隔 (s)；
                                # 越小 timed_trajectory 点越密，过弯处越容易密集
     min_traj_num: 5            # 最少时间分段数，防止轨迹时间过短导致采样点太少
     traj_cut_length: 10        # 轨迹截断长度阈值 (m)，超过则标记需要截断

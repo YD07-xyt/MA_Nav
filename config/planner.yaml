@@ -6,43 +6,69 @@ ros2:
   odom_topic_name: "/lio/base_odom"           # 里程计话题，提供位置/速度/姿态
   map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"   # 地图参数
   global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm" # 全局栅格地图
-  is_minco: true
+  is_minco: false
 # ==================== 地图模式 ====================
 map:
   mapping_model: false   # true=建图模式，false=规划模式
 
 # ==================== 规划器配置 ====================
 planner_config:
+    # ---------- 上游路径规划 / 梯形速度规划参数 ----------
+  path_planning_params:
+    safe_threshold: 0.3        # JPS/A* 与后处理的安全距离阈值 (m)
+    max_vel: 3.0               # 梯形速度规划最大速度 (m/s)
+    max_acc: 5.0               # 梯形速度规划最大加速度 (m/s²)
+    time_resolution: 0.4       # 均匀时间重采样间隔 (s)；
+                               # 越小 timed_trajectory 点越密，过弯处越容易密集
+    min_traj_num: 5            # 最少时间分段数，防止轨迹时间过短导致采样点太少
+    max_traj_num: 16
+    traj_cut_length: 10        # 轨迹截断长度阈值 (m)，超过则标记需要截断
+    distance_weight: 1.0       # 路径长度权重，用于梯形速度规划的加权长度计算
+    yaw_weight: 0.5            # 航向变化权重，转弯越多加权长度越大、速度越慢
+    dense_sample_resolution: 0.1   # 高密度采样间距
+    rotation_penalty_weight: 1.0   # 转弯惩罚权重
+
     # ---------- MA Spline 轨迹优化参数 ----------
   ma_spline_opt_params:
-    mode: "OMNI_XY"            # OMNI_XY / OMNI_XY_YAW / OMNI_XY_YAW_JOINT
-    rho_energy: 20.0            # 平滑代价权重
-    weight_time: 20.0          # 时间代价权重
-    weight_mean_time: 40.0     # 平均时间约束权重
-    mean_lower: 0.9            # 平均时间下界比例
-    mean_upper: 1.1            # 平均时间上界比例
-    min_time: 0.1              # 最小段时间 (s)
-    weight_min_time: 100.0     # 最小时间软约束权重
+    mode: "OMNI_XY"
+    safe_distance: 0.3
+    v_max: 3.0
+    a_max: 5.0
+    integral_num_steps: 8
 
-    weight_obstacle: 8000.0    # 避障代价权重
-    safe_distance: 0.3         # 安全距离 (m)
+    # ========== Stage 1：形状优化 ==========
+    stage1:
+      rho_energy: 10.0
+      weight_time: 20.0
+      weight_mean_time: 40.0
+      mean_lower: 0.9
+      mean_upper: 1.1
+      min_time: 0.1
+      weight_min_time: 100.0
+      weight_obstacle: 800.0
+      weight_vel: 5.0
+      weight_acc: 5.0
+      max_iterations: 100
+      g_epsilon: 1e-4
+      lbfgs_mem_size: 64
+      lbfgs_delta: 5e-3
 
-    weight_vel: 40.0           # 速度约束权重
-    weight_acc: 40.0           # 加速度约束权重
-    v_max: 3.0                 # 最大线速度 (m/s)
-    a_max: 5.0                 # 最大线加速度 (m/s²)
-
-    weight_yaw_vel: 10.0       # yaw 角速度约束权重
-    weight_yaw_acc: 5.0        # yaw 角加速度约束权重
-    yaw_rate_max: 1.0          # 最大角速度 (rad/s)
-    yaw_acc_max: 2.0           # 最大角加速度 (rad/s²)
-
-    integral_num_steps: 8      # 每段积分采样点数
-    num_segments: 8            # 优化段数，越小越快
-    max_iterations: 8000        # L-BFGS 最大迭代次数
-    g_epsilon: 1e-4            # 梯度收敛阈值
-    lbfgs_mem_size: 256         # L-BFGS 记忆大小
-    lbfgs_delta: 5e-3          # L-BFGS 增量收敛阈值
+    # ========== Stage 2：严格优化 ==========
+    stage2:
+      rho_energy: 5.0
+      weight_time: 20.0
+      weight_mean_time: 40.0
+      mean_lower: 0.9
+      mean_upper: 1.1
+      min_time: 0.1
+      weight_min_time: 100.0
+      weight_obstacle: 8000.0
+      weight_vel: 40.0
+      weight_acc: 40.0
+      max_iterations: 200
+      g_epsilon: 1e-4
+      lbfgs_mem_size: 64
+      lbfgs_delta: 5e-3
 
   # ---------- MINCO 轨迹优化参数 ----------
   minco_opt_params:
@@ -79,17 +105,6 @@ planner_config:
                                          # 机器人距旧轨迹投影点小于 0.3m 时，用旧轨迹 PVA 热启动
     projection_search_resolution: 0.02   # 投影点搜索时间分辨率 (s)，越小越精确但计算量越大
 
-  # ---------- 上游路径规划 / 梯形速度规划参数 ----------
-  path_planning_params:
-    safe_threshold: 0.3        # JPS/A* 与后处理的安全距离阈值 (m)
-    max_vel: 3.0               # 梯形速度规划最大速度 (m/s)
-    max_acc: 5.0               # 梯形速度规划最大加速度 (m/s²)
-    time_resolution: 0.4      # 均匀时间重采样间隔 (s)；
-                               # 越小 timed_trajectory 点越密，过弯处越容易密集
-    min_traj_num: 5            # 最少时间分段数，防止轨迹时间过短导致采样点太少
-    traj_cut_length: 10        # 轨迹截断长度阈值 (m)，超过则标记需要截断
-    distance_weight: 1.0       # 路径长度权重，用于梯形速度规划的加权长度计算
-    yaw_weight: 0.5            # 航向变化权重，转弯越多加权长度越大、速度越慢
 
 # ==================== LMPC 控制器参数 ====================
 lmpc_param:

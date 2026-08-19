@@ -10,17 +10,8 @@
 
 namespace ma_spline_opt {
 
-struct MaSplineOptimizerConfig
+struct StageOptimizerConfig
 {
-    enum class Mode
-    {
-        OMNI_XY,
-        OMNI_XY_YAW,
-        OMNI_XY_YAW_JOINT
-    };
-
-    Mode mode = Mode::OMNI_XY;
-
     // 平滑
     double rho_energy = 5.0;
 
@@ -34,15 +25,35 @@ struct MaSplineOptimizerConfig
 
     // ESDF
     double weight_obstacle = 8000.0;
-    double safe_distance = 0.3;
 
     // 动力学
     double weight_vel = 40.0;
     double weight_acc = 40.0;
+
+    // L-BFGS
+    int max_iterations = 200;
+    double g_epsilon = 1e-4;
+    int lbfgs_mem_size = 64;
+    double lbfgs_delta = 5e-3;
+};
+
+struct MaSplineOptimizerConfig
+{
+    enum class Mode
+    {
+        OMNI_XY,
+        OMNI_XY_YAW,
+        OMNI_XY_YAW_JOINT
+    };
+
+    Mode mode = Mode::OMNI_XY;
+
+    // 两阶段公共约束
+    double safe_distance = 0.3;
     double v_max = 3.0;
     double a_max = 5.0;
 
-    // yaw 动力学
+    // yaw 动力学（暂时保留）
     double weight_yaw_vel = 10.0;
     double weight_yaw_acc = 5.0;
     double yaw_rate_max = 1.0;
@@ -51,14 +62,9 @@ struct MaSplineOptimizerConfig
     // 积分采样
     int integral_num_steps = 8;
 
-    // 重采样段数，参考 minco 的 pieceNum
-    int num_segments = 8;
-
-    // L-BFGS
-    int max_iterations = 2000;
-    double g_epsilon = 1e-4;
-    int lbfgs_mem_size = 64;
-    double lbfgs_delta = 5e-3;
+    // ========== 两次优化参数分开 ==========
+    StageOptimizerConfig stage1;
+    StageOptimizerConfig stage2;
 };
 
 struct TimedReferencePoint

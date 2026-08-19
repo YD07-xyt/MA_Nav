@@ -117,7 +117,23 @@ auto PathPostProcessing::normalize_angle(double ref_angle, double& angle) const 
     while (ref_angle - angle < -M_PI)
         angle -= 2 * M_PI;
 }
+
 auto PathPostProcessing::assign_trajectory_timing(Trajectory& traj) -> void {
+    /**1. 高密度采样
+        -> 保留路径细节，避免拐角信息丢失
+
+        2. 转弯惩罚
+        -> 过弯多的区域等效距离更长，时间分配更充裕
+
+        3. 前向后向速度传播
+        -> 局部限速更真实，避免末端速度/时间不合理
+
+        4. min/max waypoints
+        -> 优化变量数量可控，不会因为 time_resolution 太小而爆炸
+
+        5. 均匀初始时间
+        -> 每段时间相等，优化器在此基础上微调 */
+
     if (traj.optimized_path.size() < 2) return;
 
     // ============================================================

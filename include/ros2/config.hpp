@@ -43,51 +43,44 @@ inline Eigen::Matrix3d load_matrix3d(const YAML::Node& node) {
     return mat;
 }
 // 辅助函数：加载 MaSplineOptimizerConfig
-inline void load_ma_spline_opt_config(
-    const YAML::Node& node,
-    ma_spline_opt::MaSplineOptimizerConfig& param)
-{
+inline void load_stage_config(const YAML::Node& node, ma_spline_opt::StageOptimizerConfig& stage) {
     if (!node) return;
 
-    if (node["mode"])
-    {
+    if (node["rho_energy"]) stage.rho_energy = node["rho_energy"].as<double>();
+    if (node["weight_time"]) stage.weight_time = node["weight_time"].as<double>();
+    if (node["weight_mean_time"]) stage.weight_mean_time = node["weight_mean_time"].as<double>();
+    if (node["mean_lower"]) stage.mean_lower = node["mean_lower"].as<double>();
+    if (node["mean_upper"]) stage.mean_upper = node["mean_upper"].as<double>();
+    if (node["min_time"]) stage.min_time = node["min_time"].as<double>();
+    if (node["weight_min_time"]) stage.weight_min_time = node["weight_min_time"].as<double>();
+    if (node["weight_obstacle"]) stage.weight_obstacle = node["weight_obstacle"].as<double>();
+    if (node["weight_vel"]) stage.weight_vel = node["weight_vel"].as<double>();
+    if (node["weight_acc"]) stage.weight_acc = node["weight_acc"].as<double>();
+    if (node["max_iterations"]) stage.max_iterations = node["max_iterations"].as<int>();
+    if (node["g_epsilon"]) stage.g_epsilon = node["g_epsilon"].as<double>();
+    if (node["lbfgs_mem_size"]) stage.lbfgs_mem_size = node["lbfgs_mem_size"].as<int>();
+    if (node["lbfgs_delta"]) stage.lbfgs_delta = node["lbfgs_delta"].as<double>();
+}
+
+inline void load_ma_spline_opt_config(const YAML::Node& node, ma_spline_opt::MaSplineOptimizerConfig& param) {
+    if (!node) return;
+
+    if (node["mode"]) {
         std::string mode = node["mode"].as<std::string>();
-        if (mode == "OMNI_XY")
-            param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY;
-        else if (mode == "OMNI_XY_YAW")
-            param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY_YAW;
+        if (mode == "OMNI_XY") param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY;
+        else if (mode == "OMNI_XY_YAW") param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY_YAW;
         else if (mode == "OMNI_XY_YAW_JOINT")
             param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY_YAW_JOINT;
     }
 
-    if (node["rho_energy"]) param.rho_energy = node["rho_energy"].as<double>();
-    if (node["weight_time"]) param.weight_time = node["weight_time"].as<double>();
-    if (node["weight_mean_time"]) param.weight_mean_time = node["weight_mean_time"].as<double>();
-    if (node["mean_lower"]) param.mean_lower = node["mean_lower"].as<double>();
-    if (node["mean_upper"]) param.mean_upper = node["mean_upper"].as<double>();
-    if (node["min_time"]) param.min_time = node["min_time"].as<double>();
-    if (node["weight_min_time"]) param.weight_min_time = node["weight_min_time"].as<double>();
-
-    if (node["weight_obstacle"]) param.weight_obstacle = node["weight_obstacle"].as<double>();
     if (node["safe_distance"]) param.safe_distance = node["safe_distance"].as<double>();
-
-    if (node["weight_vel"]) param.weight_vel = node["weight_vel"].as<double>();
-    if (node["weight_acc"]) param.weight_acc = node["weight_acc"].as<double>();
     if (node["v_max"]) param.v_max = node["v_max"].as<double>();
     if (node["a_max"]) param.a_max = node["a_max"].as<double>();
-
-    if (node["weight_yaw_vel"]) param.weight_yaw_vel = node["weight_yaw_vel"].as<double>();
-    if (node["weight_yaw_acc"]) param.weight_yaw_acc = node["weight_yaw_acc"].as<double>();
-    if (node["yaw_rate_max"]) param.yaw_rate_max = node["yaw_rate_max"].as<double>();
-    if (node["yaw_acc_max"]) param.yaw_acc_max = node["yaw_acc_max"].as<double>();
-
     if (node["integral_num_steps"]) param.integral_num_steps = node["integral_num_steps"].as<int>();
-    if (node["num_segments"]) param.num_segments = node["num_segments"].as<int>();
 
-    if (node["max_iterations"]) param.max_iterations = node["max_iterations"].as<int>();
-    if (node["g_epsilon"]) param.g_epsilon = node["g_epsilon"].as<double>();
-    if (node["lbfgs_mem_size"]) param.lbfgs_mem_size = node["lbfgs_mem_size"].as<int>();
-    if (node["lbfgs_delta"]) param.lbfgs_delta = node["lbfgs_delta"].as<double>();
+    if (node["stage1"]) load_stage_config(node["stage1"], param.stage1);
+
+    if (node["stage2"]) load_stage_config(node["stage2"], param.stage2);
 }
 // 辅助函数：加载 MincoOptimizerConfig
 inline void load_minco_opt_config(const YAML::Node& node, minco_opt::MincoOptimizerConfig& param) {
@@ -120,8 +113,8 @@ inline void load_replan_param(const YAML::Node& node, replan::FsmReplan::ReplanP
     //if (node["hard_clearance"]) param.hard_clearance = node["hard_clearance"].as<double>();
     if (node["minco_traj_continuity_threshold"])
         param.minco_traj_continuity_threshold = node["minco_traj_continuity_threshold"].as<double>();
-     if (node["projection_search_resolution"]) param.projection_search_resolution = node["projection_search_resolution"].as<double>();
-
+    if (node["projection_search_resolution"])
+        param.projection_search_resolution = node["projection_search_resolution"].as<double>();
 }
 
 // 辅助函数：加载 PathPostProcessingParams
@@ -130,6 +123,9 @@ inline void load_path_post_processing_params(
     path_planning::PathPostProcessing::PathPostProcessingParams& param
 ) {
     if (!node) return;
+    if (node["max_traj_num"]) param.max_traj_num = node["max_traj_num"].as<int>();
+    if (node["dense_sample_resolution"]) param.dense_sample_resolution = node["dense_sample_resolution"].as<double>();
+    if (node["rotation_penalty_weight"]) param.rotation_penalty_weight = node["rotation_penalty_weight"].as<double>();
     if (node["safe_threshold"]) param.safe_threshold = node["safe_threshold"].as<double>();
     if (node["max_vel"]) param.max_vel = node["max_vel"].as<double>();
     if (node["max_acc"]) param.max_acc = node["max_acc"].as<double>();

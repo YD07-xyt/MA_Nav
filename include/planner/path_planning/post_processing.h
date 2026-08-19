@@ -17,6 +17,7 @@ private:
         Eigen::Vector3d state; // x, y, theta
         double time = 0;
     };
+
 public:
     // Trajectory data structure
     struct Trajectory {
@@ -44,6 +45,7 @@ public:
         std::vector<Eigen::Vector3d> UnOccupied_positions; // Unoccupied positions sequence
         double UnOccupied_initT = 0.0; // Initial time
     };
+
 public:
     struct PathPostProcessingParams {
         double safe_threshold;
@@ -52,27 +54,33 @@ public:
         double max_acc;
         double time_resolution;
         int min_traj_num;
+        int max_traj_num = 12; // 新增：最大段数
         double traj_cut_length;
         double distance_weight;
         double yaw_weight;
         double start_vel {0.0};
         double end_vel {0.0};
+        // 新增：路径预处理参数
+        double dense_sample_resolution = 0.1; // 高密度采样间距
+        double rotation_penalty_weight = 1.0; // 转弯惩罚权重
     };
+
 private:
     PathPostProcessingParams params_;
     grid_map::GridMap map_;
-public: 
+
+public:
     auto set_map(const grid_map::GridMap& map) -> void {
         map_ = map;
     };
-    auto set_start_vel(const double& start_vel)->void{
-        params_.start_vel=start_vel;
+    auto set_start_vel(const double& start_vel) -> void {
+        params_.start_vel = start_vel;
     }
-    auto set_end_vel(const double& end_vel)->void{
-        params_.end_vel=end_vel;
+    auto set_end_vel(const double& end_vel) -> void {
+        params_.end_vel = end_vel;
     }
-    auto set_params(const PathPostProcessingParams& params)->void{
-        params_=params;
+    auto set_params(const PathPostProcessingParams& params) -> void {
+        params_ = params;
     }
 
 public:

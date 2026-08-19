@@ -6,7 +6,7 @@ ros2:
   odom_topic_name: "/lio/base_odom"           # 里程计话题，提供位置/速度/姿态
   map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"   # 地图参数
   global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm" # 全局栅格地图
-  is_minco: false
+  is_minco: true
 # ==================== 地图模式 ====================
 map:
   mapping_model: false   # true=建图模式，false=规划模式
@@ -16,7 +16,7 @@ planner_config:
     # ---------- MA Spline 轨迹优化参数 ----------
   ma_spline_opt_params:
     mode: "OMNI_XY"            # OMNI_XY / OMNI_XY_YAW / OMNI_XY_YAW_JOINT
-    rho_energy: 5.0            # 平滑代价权重
+    rho_energy: 20.0            # 平滑代价权重
     weight_time: 20.0          # 时间代价权重
     weight_mean_time: 40.0     # 平均时间约束权重
     mean_lower: 0.9            # 平均时间下界比例
@@ -84,7 +84,7 @@ planner_config:
     safe_threshold: 0.3        # JPS/A* 与后处理的安全距离阈值 (m)
     max_vel: 3.0               # 梯形速度规划最大速度 (m/s)
     max_acc: 5.0               # 梯形速度规划最大加速度 (m/s²)
-    time_resolution: 0.6      # 均匀时间重采样间隔 (s)；
+    time_resolution: 0.4      # 均匀时间重采样间隔 (s)；
                                # 越小 timed_trajectory 点越密，过弯处越容易密集
     min_traj_num: 5            # 最少时间分段数，防止轨迹时间过短导致采样点太少
     traj_cut_length: 10        # 轨迹截断长度阈值 (m)，超过则标记需要截断

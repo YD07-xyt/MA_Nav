@@ -193,14 +193,14 @@ void GlobalPlanner2d::plan_omni() {
                 route.emplace_back(point.x(), point.y(), 0.0);
             }
             visualizer.visualize(path_result.minco_opt_traj, route);
-            // // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
-            // trajectory_ = path_result.minco_opt_traj;
+            // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
+            trajectory_ = path_result.minco_opt_traj;
 
-            // if (current_XYTheta.has_value()) {
-            //     omni_lmpc_.initialize_track(*current_XYTheta, trajectory_);
-            // } else {
-            //     omni_lmpc_.reset_track();
-            // }
+            if (current_XYTheta.has_value()) {
+                omni_lmpc_.initialize_track(*current_XYTheta, trajectory_);
+            } else {
+                omni_lmpc_.reset_track();
+            }
         }
     }
 }

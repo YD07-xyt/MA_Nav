@@ -117,64 +117,232 @@ auto PathPostProcessing::normalize_angle(double ref_angle, double& angle) const 
     while (ref_angle - angle < -M_PI)
         angle -= 2 * M_PI;
 }
-
 auto PathPostProcessing::assign_trajectory_timing(Trajectory& traj) -> void {
-    if (traj.path_states.empty()) return;
+    if (traj.optimized_path.size() < 2) return;
 
-    // Calculate weighted path length (considering angle changes)
-    traj.total_length = 0;
-    traj.weighted_length = 0;
-    for (const auto& state: traj.path_states) {
-        traj.total_length += state.delta_s;
-        traj.weighted_length += state.delta_s * params_.distance_weight + fabs(state.delta_theta) * params_.yaw_weight;
+    // ============================================================
+    // 1. 高密度采样 + 等效距离（含转弯惩罚）
+    // ============================================================
+    struct DenseSample {
+        double linear_dist = 0.0;
+        double equiv_dist = 0.0;
+        double time = 0.0;
+        Eigen::Vector2d pos = Eigen::Vector2d::Zero();
+        double yaw = 0.0;
+    };
+
+    std::vector<DenseSample> dense;
+
+    // 起点
+    Eigen::Vector2d start_pos = traj.optimized_path.front();
+    double start_yaw = 0.0;
+    if (!traj.path_states.empty()) start_yaw = traj.path_states.front().theta;
+
+    dense.push_back({0.0, 0.0, 0.0, start_pos, start_yaw});
+
+    Eigen::Vector2d last_pos = start_pos;
+    double last_yaw = start_yaw;
+
+    double accumulated_linear = 0.0;
+    double accumulated_equiv = 0.0;
+
+    for (size_t i = 1; i < traj.optimized_path.size(); ++i) {
+        const Eigen::Vector2d curr_pos = traj.optimized_path[i];
+
+        const double seg_len = (curr_pos - last_pos).norm();
+        double curr_yaw = std::atan2(curr_pos.y() - last_pos.y(), curr_pos.x() - last_pos.x());
+
+        // 角度连续化
+        double d_yaw = curr_yaw - last_yaw;
+        while (d_yaw > M_PI)
+            d_yaw -= 2.0 * M_PI;
+        while (d_yaw < -M_PI)
+            d_yaw += 2.0 * M_PI;
+
+        // 高密度细分
+        const int subdivisions = std::max(1, static_cast<int>(std::ceil(seg_len / params_.dense_sample_resolution)));
+
+        for (int j = 1; j <= subdivisions; ++j) {
+            const double ratio = static_cast<double>(j) / subdivisions;
+
+            const Eigen::Vector2d pos = last_pos + ratio * (curr_pos - last_pos);
+
+            const double yaw = last_yaw + ratio * d_yaw;
+
+            const double ds_linear = (pos - dense.back().pos).norm();
+
+            double d_theta = std::abs(yaw - dense.back().yaw);
+            while (d_theta > M_PI)
+                d_theta = 2.0 * M_PI - d_theta;
+
+            // 等效距离 = 线性距离 + 转弯惩罚 * |Δθ|
+            const double ds_equiv = ds_linear + params_.rotation_penalty_weight * d_theta;
+
+            accumulated_linear += ds_linear;
+            accumulated_equiv += ds_equiv;
+
+            dense.push_back({accumulated_linear, accumulated_equiv, 0.0, pos, yaw});
+        }
+
+        last_pos = curr_pos;
+        last_yaw = curr_yaw;
     }
 
-    // Calculate total time (trapezoidal velocity profile, uses actual start/end vel)
-    traj.total_time =
-        evaluate_duration(traj.weighted_length, params_.start_vel, params_.end_vel, params_.max_vel, params_.max_acc);
+    if (dense.size() < 2) return;
 
-    // Sample time points
-    int num_segments = std::max(
-        static_cast<int>(traj.total_time / params_.time_resolution + 0.5), 
-        params_.min_traj_num
-    );
-    double sample_time = traj.total_time / num_segments; // Δt
+    traj.total_length = accumulated_linear;
+    traj.weighted_length = accumulated_equiv;
 
-    // 直接生成均匀的段间时间向量
+    // ============================================================
+    // 2. 前向 / 后向速度传播
+    // ============================================================
+    const int M = static_cast<int>(dense.size());
+
+    std::vector<double> vmax(M, params_.max_vel);
+    vmax.front() = params_.start_vel;
+    vmax.back() = params_.end_vel;
+
+    // 前向：受加速能力限制
+    for (int i = 1; i < M; ++i) {
+        const double ds = dense[i].equiv_dist - dense[i - 1].equiv_dist;
+        const double v_forward = std::sqrt(std::max(0.0, vmax[i - 1] * vmax[i - 1] + 2.0 * params_.max_acc * ds));
+
+        vmax[i] = std::min(vmax[i], v_forward);
+    }
+
+    // 后向：受减速能力限制
+    for (int i = M - 2; i >= 0; --i) {
+        const double ds = dense[i + 1].equiv_dist - dense[i].equiv_dist;
+        const double v_backward = std::sqrt(std::max(0.0, vmax[i + 1] * vmax[i + 1] + 2.0 * params_.max_acc * ds));
+
+        vmax[i] = std::min(vmax[i], v_backward);
+    }
+
+    // ============================================================
+    // 3. 积分得到到达时间
+    // ============================================================
+    dense.front().time = 0.0;
+    for (int i = 1; i < M; ++i) {
+        const double ds = dense[i].equiv_dist - dense[i - 1].equiv_dist;
+        const double v_avg = 0.5 * (vmax[i - 1] + vmax[i]);
+
+        if (v_avg > 1e-6) dense[i].time = dense[i - 1].time + ds / v_avg;
+        else dense[i].time = dense[i - 1].time;
+    }
+
+    const double total_time = dense.back().time;
+    if (total_time <= 1e-6) return;
+
+    traj.total_time = total_time;
+
+    // ============================================================
+    // 4. 限制 min/max waypoints，生成均匀初始时间
+    // ============================================================
+    int num_segments = static_cast<int>(std::lround(total_time / params_.time_resolution));
+
+    num_segments = std::max(params_.min_traj_num, num_segments);
+    num_segments = std::min(params_.max_traj_num, num_segments);
+
+    const double sample_time = total_time / num_segments;
+
     traj.time_segments = Eigen::VectorXd::Constant(num_segments, sample_time);
 
-    // Generate timed trajectory points
-    double accumulated_s = 0;
-    size_t state_idx = 0;
+    // ============================================================
+    // 5. 按均匀时间重采样 timed_trajectory
+    // ============================================================
+    auto interpolateDense = [&](double t) -> std::pair<Eigen::Vector2d, double> {
+        if (t <= 0.0) return {dense.front().pos, dense.front().yaw};
 
-    for (double t = sample_time; t < traj.total_time - 1e-3; t += sample_time) {
-        double s = evaluate_length(
-            t,
-            traj.weighted_length,
-            traj.total_time,
-            params_.start_vel,
-            params_.end_vel,
-            params_.max_vel,
-            params_.max_acc
-        );
+        if (t >= total_time - 1e-9) return {dense.back().pos, dense.back().yaw};
 
-        // Find corresponding state
-        while (state_idx < traj.path_states.size() - 1 && accumulated_s + traj.path_states[state_idx].delta_s < s) {
-            accumulated_s += traj.path_states[state_idx].delta_s;
-            state_idx++;
-        }
+        size_t idx = 1;
+        while (idx < dense.size() && dense[idx].time < t)
+            ++idx;
 
-        if (state_idx > 0) {
-            double ratio = (s - accumulated_s) / traj.path_states[state_idx].delta_s;
+        if (idx >= dense.size()) return {dense.back().pos, dense.back().yaw};
 
-            Eigen::Vector2d pos = traj.path_states[state_idx - 1].position
-                + ratio * (traj.path_states[state_idx].position - traj.path_states[state_idx - 1].position);
-            double theta = traj.path_states[state_idx - 1].theta + ratio * (traj.path_states[state_idx].delta_theta);
+        const auto& a = dense[idx - 1];
+        const auto& b = dense[idx];
 
-            traj.timed_trajectory.push_back({Eigen::Vector3d(pos.x(), pos.y(), theta), t});
-        }
+        const double dt = b.time - a.time;
+        const double r = dt > 1e-9 ? (t - a.time) / dt : 0.0;
+
+        Eigen::Vector2d pos = a.pos + r * (b.pos - a.pos);
+        double yaw = a.yaw + r * (b.yaw - a.yaw);
+
+        return {pos, yaw};
+    };
+
+    traj.timed_trajectory.clear();
+    traj.timed_trajectory.reserve(num_segments + 1);
+
+    for (int k = 0; k <= num_segments; ++k) {
+        const double t = k * sample_time;
+        const auto [pos, yaw] = interpolateDense(t);
+
+        TimedTrajectoryPoint point;
+        point.state = Eigen::Vector3d(pos.x(), pos.y(), yaw);
+        point.time = t;
+        traj.timed_trajectory.push_back(point);
     }
 }
+// auto PathPostProcessing::assign_trajectory_timing(Trajectory& traj) -> void {
+//     if (traj.path_states.empty()) return;
+
+//     // Calculate weighted path length (considering angle changes)
+//     traj.total_length = 0;
+//     traj.weighted_length = 0;
+//     for (const auto& state: traj.path_states) {
+//         traj.total_length += state.delta_s;
+//         traj.weighted_length += state.delta_s * params_.distance_weight + fabs(state.delta_theta) * params_.yaw_weight;
+//     }
+
+//     // Calculate total time (trapezoidal velocity profile, uses actual start/end vel)
+//     traj.total_time =
+//         evaluate_duration(traj.weighted_length, params_.start_vel, params_.end_vel, params_.max_vel, params_.max_acc);
+
+//     // Sample time points
+//     int num_segments = std::max(
+//         static_cast<int>(traj.total_time / params_.time_resolution + 0.5),
+//         params_.min_traj_num
+//     );
+//     double sample_time = traj.total_time / num_segments; // Δt
+
+//     // 直接生成均匀的段间时间向量
+//     traj.time_segments = Eigen::VectorXd::Constant(num_segments, sample_time);
+
+//     // Generate timed trajectory points
+//     double accumulated_s = 0;
+//     size_t state_idx = 0;
+
+//     for (double t = sample_time; t < traj.total_time - 1e-3; t += sample_time) {
+//         double s = evaluate_length(
+//             t,
+//             traj.weighted_length,
+//             traj.total_time,
+//             params_.start_vel,
+//             params_.end_vel,
+//             params_.max_vel,
+//             params_.max_acc
+//         );
+
+//         // Find corresponding state
+//         while (state_idx < traj.path_states.size() - 1 && accumulated_s + traj.path_states[state_idx].delta_s < s) {
+//             accumulated_s += traj.path_states[state_idx].delta_s;
+//             state_idx++;
+//         }
+
+//         if (state_idx > 0) {
+//             double ratio = (s - accumulated_s) / traj.path_states[state_idx].delta_s;
+
+//             Eigen::Vector2d pos = traj.path_states[state_idx - 1].position
+//                 + ratio * (traj.path_states[state_idx].position - traj.path_states[state_idx - 1].position);
+//             double theta = traj.path_states[state_idx - 1].theta + ratio * (traj.path_states[state_idx].delta_theta);
+
+//             traj.timed_trajectory.push_back({Eigen::Vector3d(pos.x(), pos.y(), theta), t});
+//         }
+//     }
+// }
 
 auto PathPostProcessing::fill_additional_trajectory_info(
     Trajectory& traj,

@@ -317,7 +317,7 @@ Visualization Manager:
               Buffer Length: 1
               Class: rviz_default_plugins/Path
               Color: 26; 95; 180
-              Enabled: true
+              Enabled: false
               Head Diameter: 0.30000001192092896
               Head Length: 0.20000000298023224
               Length: 0.30000001192092896
@@ -340,7 +340,7 @@ Visualization Manager:
                 History Policy: Keep Last
                 Reliability Policy: Reliable
                 Value: /ma_nav/opt_path
-              Value: true
+              Value: false
             - Alpha: 1
               Buffer Length: 1
               Class: rviz_default_plugins/Path
@@ -663,8 +663,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 2.570326328277588
-        Min Value: -0.13171395659446716
+        Max Value: 2.7222237586975098
+        Min Value: -0.15065567195415497
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -910,25 +910,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 32.730674743652344
+      Distance: 34.537567138671875
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 7.10600471496582
-        Y: 0.8213137984275818
-        Z: -13.055243492126465
+        X: 16.203601837158203
+        Y: 0.8160094022750854
+        Z: -12.799324035644531
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.3747965097427368
+      Pitch: 0.909796953201294
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.0972251892089844
+      Yaw: 3.1372203826904297
     Saved: ~
 Window Geometry:
   Displays:

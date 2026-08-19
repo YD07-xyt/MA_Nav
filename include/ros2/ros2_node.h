@@ -93,8 +93,8 @@ private:
   //contorller
   controller::LMpc omni_lmpc_;
   double t_now_;
-  Trajectory<5, 2> trajectory_;
-  // SplineTrajectory::PPolyND<2, 6> trajectory_;
+  Trajectory<5, 2> minco_trajectory_;
+  SplineTrajectory::PPolyND<2, 6> trajectory_ppoly_;
   std::chrono::steady_clock::time_point start_time_;
 public:
   explicit GlobalPlanner2d(rclcpp::Node::SharedPtr nh_,std::string params_path);

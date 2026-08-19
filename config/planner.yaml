@@ -39,7 +39,7 @@ planner_config:
     # ========== Stage 1：形状优化 ==========
     stage1:
       rho_energy: 10.0
-      weight_time: 20.0
+      weight_time: 80.0
       weight_mean_time: 40.0
       mean_lower: 0.9
       mean_upper: 1.1

@@ -68,11 +68,19 @@ public:
 private:
     PathPostProcessingParams params_;
     grid_map::GridMap map_;
+    Eigen::Vector3d start_velocity_vector_ = Eigen::Vector3d::Zero();
+    Eigen::Vector3d final_velocity_vector_ = Eigen::Vector3d::Zero();
 
 public:
     auto set_map(const grid_map::GridMap& map) -> void {
         map_ = map;
     };
+    auto set_start_velocity_vector(const Eigen::Vector3d& vel) -> void {
+        start_velocity_vector_ = vel;
+    }
+    auto set_end_velocity_vector(const Eigen::Vector3d& vel) -> void {
+        final_velocity_vector_ = vel;
+    }
     auto set_start_vel(const double& start_vel) -> void {
         params_.start_vel = start_vel;
     }
@@ -96,7 +104,6 @@ public:
 
     auto fill_additional_trajectory_info(Trajectory& traj, const Eigen::Vector2d& start, const Eigen::Vector2d& goal)
         -> void;
-
     auto evaluate_duration(double length, double start_vel, double end_vel, double max_vel, double max_acc) const
         -> double;
 

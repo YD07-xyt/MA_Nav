@@ -381,8 +381,8 @@ auto PathPostProcessing::fill_additional_trajectory_info(
     traj.if_cut = (traj.total_length > params_.traj_cut_length);
 
     // Set default velocity/acceleration (can be adjusted as needed)
-    traj.start_state << 0, 0, 0; // Initial velocity 0
-    traj.final_state << 0, 0, 0; // Final velocity 0
+    traj.start_state = start_velocity_vector_; // Initial velocity 0
+    traj.final_state = final_velocity_vector_; // Final velocity 0
 }
 
 auto PathPostProcessing::evaluate_duration(

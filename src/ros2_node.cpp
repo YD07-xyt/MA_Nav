@@ -93,8 +93,12 @@ void GlobalPlanner2d::controller_callback() {
     //     // spdlog::warn("轨迹未初始化，等待规划...");
     //     return;
     // }
-    if (trajectory_.getPieceNum() == 0) {
-        return;
+    if (config.is_minco == true) {
+        if (minco_trajectory_.getPieceNum() == 0) {
+            return;
+        }
+    } else {
+        if (trajectory_ppoly_.getNumSegments() == 0) return;
     }
     // 距离目标检查（优先）
     // 位置阈值 0.08m:比 MPC 停车半径(0.05)略宽,避免 MPC 在 0.06m 处爬行导致
@@ -131,8 +135,14 @@ void GlobalPlanner2d::controller_callback() {
 
     // 更新状态并求解（参考游标由 MPC 内部按机器人实际进度跟踪，
     //    不再依赖墙钟时间，避免落后参考时反复切角、偏差累积）
-    omni_lmpc_.update_current_pose(*current_XYTheta);
-    auto predicted = omni_lmpc_.slover(trajectory_);
+    std::vector<Eigen::Vector3d> predicted;
+    if (config.is_minco == true) {
+        omni_lmpc_.update_current_pose(*current_XYTheta);
+        predicted = omni_lmpc_.slover(minco_trajectory_);
+    } else {
+        omni_lmpc_.update_current_pose(*current_XYTheta);
+        predicted = omni_lmpc_.slover(trajectory_ppoly_);
+    }
     if (predicted.empty()) {
         logger::ros2->warn("MPC 求解失败");
         return;
@@ -159,30 +169,33 @@ void GlobalPlanner2d::plan_omni() {
         logger::ros2->debug("no current_pose");
         return;
     }
-    
+
     if (config.is_minco == false) {
-        auto result = fsm_replanner.one_plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
+        auto result = fsm_replanner.plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
         if (result) {
             auto path_result = result.value();
             visualizer.PubGlobalPath(path_result.planning_traj.raw_path);
-            //std::vector<Eigen::Vector2d> opt_path = opt.sampleTrajectory(0.1);
             visualizer.PubOptPath(path_result.planning_traj.optimized_path);
+
             std::vector<Eigen::Vector3d> route;
             for (auto point: path_result.planning_traj.optimized_path) {
                 route.emplace_back(point.x(), point.y(), 0.0);
             }
+
             visualizer.visualize(result->ma_spline_traj, route);
             // // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
-            // trajectory_ = path_result.minco_opt_traj;
+            if (result->ma_spline_traj.success && result->ma_spline_traj.xy_spline.isInitialized()) {
+                trajectory_ppoly_ = result->ma_spline_traj.xy_spline.getTrajectory();
 
-            // if (current_XYTheta.has_value()) {
-            //     omni_lmpc_.initialize_track(*current_XYTheta, trajectory_);
-            // } else {
-            //     omni_lmpc_.reset_track();
-            // }
+                if (current_XYTheta.has_value()) {
+                    omni_lmpc_.initialize_track(*current_XYTheta, trajectory_ppoly_);
+                } else {
+                    omni_lmpc_.reset_track();
+                }
+            }
         }
     } else {
-        auto result = fsm_replanner.plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
+        auto result = fsm_replanner.minco_plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
         if (result) {
             auto path_result = result.value();
             visualizer.PubGlobalPath(path_result.planning_traj.raw_path);
@@ -194,10 +207,10 @@ void GlobalPlanner2d::plan_omni() {
             }
             visualizer.visualize(path_result.minco_opt_traj, route);
             // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
-            trajectory_ = path_result.minco_opt_traj;
+            minco_trajectory_ = path_result.minco_opt_traj;
 
             if (current_XYTheta.has_value()) {
-                omni_lmpc_.initialize_track(*current_XYTheta, trajectory_);
+                omni_lmpc_.initialize_track(*current_XYTheta, minco_trajectory_);
             } else {
                 omni_lmpc_.reset_track();
             }
@@ -225,7 +238,7 @@ void GlobalPlanner2d::odom_callback(const nav_msgs::msg::Odometry::SharedPtr& ms
     current_pose->v.y() = twist.linear.y;
     current_pose->v.z() = twist.linear.z;
     current_pose->yaw = yaw;
-
+    current_pose->wz = twist.angular.z;
     current_XYTheta->x() = msg->pose.pose.position.x;
     current_XYTheta->y() = msg->pose.pose.position.y;
     current_XYTheta->z() = yaw;
@@ -237,6 +250,7 @@ void GlobalPlanner2d::odom_callback(const nav_msgs::msg::Odometry::SharedPtr& ms
         msg->pose.pose.orientation.y,
         msg->pose.pose.orientation.z
     );
+
     ma_map_->update_odom(pose);
 };
 void GlobalPlanner2d::map_callback(const sensor_msgs::msg::PointCloud2::SharedPtr& msg) {

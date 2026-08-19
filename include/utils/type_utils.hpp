@@ -69,6 +69,7 @@ namespace utils{
     struct RobotState {
         utils::Vec3f p, v, a, j;   // 位置 / 速度 / 加速度 / 加加速度（世界系）
         double yaw;                 // 偏航角 (rad)
+        double wz = 0.0;            // 绕 Z 轴角速度 (rad/s) 
         double rcv_time;            // 最近一次里程计消息到达的真实时间戳 (Unix 秒)
         bool rcv{false};            // 是否已收到至少一次里程计数据
         utils::Quatf q;             // 四元数姿态（原始 odom 消息携带的完整旋转）

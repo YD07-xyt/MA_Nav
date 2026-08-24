@@ -41,7 +41,7 @@ include_directories(
 
 file(GLOB_RECURSE map_sources CONFIGURE_DEPENDS "src/map/*.cpp")
 file(GLOB_RECURSE planner_sources CONFIGURE_DEPENDS "src/planner/*.cpp"  
-  "src/planner/path_planning/*.cpp" "src/planner/replan/*.cpp")
+  "src/planner/path_planning/*.cpp" "src/planner/replan/*.cpp" "src/planner/contoller/*.cpp")
 
 message(STATUS "planner_sources: ${planner_sources}")
 

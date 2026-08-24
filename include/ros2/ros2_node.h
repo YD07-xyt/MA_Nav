@@ -9,8 +9,10 @@
 
 
 //controller
+#include "planner/controller/mpc.h"
 #include "planner/controller/omni_lmpc.hpp"
 //nav
+#include "planner/controller/traj_interface.hpp"
 #include"planner/replan/fsm_replanner.h"
 //#include "planner/fsm/fsm.hpp"
 
@@ -96,6 +98,10 @@ private:
   Trajectory<5, 2> minco_trajectory_;
   SplineTrajectory::PPolyND<2, 6> trajectory_ppoly_;
   std::chrono::steady_clock::time_point start_time_;
+private:
+  control::Mpc mpc_;
+  std::shared_ptr<control::MaSplineTrajectoryInterface> ma_traj_interface_;
+  double t_track_ = 0.0;
 public:
   explicit GlobalPlanner2d(rclcpp::Node::SharedPtr nh_,std::string params_path);
   void map_callback(const sensor_msgs::msg::PointCloud2::SharedPtr &msg);

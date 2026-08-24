@@ -1,4 +1,5 @@
 #pragma once
+#include "planner/controller/mpc.h"
 #include "planner/controller/omni_lmpc.hpp"
 #include "planner/replan/fsm_replanner.h"
 #include "utils/logger.hpp"
@@ -161,6 +162,61 @@ inline void load_lmpc_param(const YAML::Node& node, controller::LMpc::LMpcParam&
     if (node["R"]) param.R = load_matrix3d(node["R"]);
 }
 
+// 辅助函数：加载 6 维向量
+inline Eigen::Matrix<double, 6, 1> load_vector6d(const YAML::Node& node) {
+    Eigen::Matrix<double, 6, 1> vec = Eigen::Matrix<double, 6, 1>::Zero();
+    if (!node.IsDefined() || !node.IsSequence() || node.size() != 6) {
+        return vec;
+    }
+    for (int i = 0; i < 6; ++i) {
+        vec(i) = node[i].as<double>();
+    }
+    return vec;
+}
+
+// 辅助函数：加载 6x6 矩阵
+// 支持两种格式：
+//   1. 长度为 36 的列表，按行优先填充
+//   2. 长度为 6 的列表，作为对角矩阵
+inline Eigen::Matrix<double, 6, 6> load_matrix6d(const YAML::Node& node) {
+    Eigen::Matrix<double, 6, 6> mat = Eigen::Matrix<double, 6, 6>::Zero();
+    if (!node.IsDefined()) return mat;
+
+    if (node.IsSequence() && node.size() == 36) {
+        for (int i = 0; i < 6; ++i) {
+            for (int j = 0; j < 6; ++j) {
+                mat(i, j) = node[i * 6 + j].as<double>();
+            }
+        }
+    } else if (node.IsSequence() && node.size() == 6) {
+        for (int i = 0; i < 6; ++i) {
+            mat(i, i) = node[i].as<double>();
+        }
+    }
+
+    return mat;
+}
+
+// 辅助函数：加载新 MPC 参数
+inline void load_mpc_param(const YAML::Node& node, control::Mpc::Param& param) {
+    if (!node) return;
+
+    if (node["N"]) param.N = node["N"].as<int>();
+    if (node["dt"]) param.dt = node["dt"].as<double>();
+
+    if (node["Q"]) param.Q = load_matrix6d(node["Q"]);
+    if (node["QN"]) param.QN = load_matrix6d(node["QN"]);
+
+    if (node["R"]) param.R = load_matrix3d(node["R"]);
+    if (node["Rd"]) param.Rd = load_matrix3d(node["Rd"]);
+
+    if (node["x_min"]) param.x_min = load_vector6d(node["x_min"]);
+    if (node["x_max"]) param.x_max = load_vector6d(node["x_max"]);
+
+    if (node["u_min"]) param.u_min = load_vector3d(node["u_min"]);
+    if (node["u_max"]) param.u_max = load_vector3d(node["u_max"]);
+}
+
 struct Config {
     std::string map_topic_name;
     std::string target_topic_name;
@@ -172,6 +228,7 @@ struct Config {
     std::string global_map_path;
     replan::FsmReplan::PlannerConfig planner_config;
     controller::LMpc::LMpcParam lmpc_param;
+    control::Mpc::Param mpc_params;
     explicit Config(std::string params_path) {
         YAML::Node config = YAML::LoadFile(params_path);
 
@@ -197,6 +254,10 @@ struct Config {
         // 加载 LMPC 参数
         if (config["lmpc_param"]) {
             load_lmpc_param(config["lmpc_param"], lmpc_param);
+        }
+        // 加载新世界系线性 MPC 参数
+        if (config["mpc_param"]) {
+            load_mpc_param(config["mpc_param"], mpc_params);
         }
     }
 };

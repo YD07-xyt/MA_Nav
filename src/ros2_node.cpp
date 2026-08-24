@@ -1,5 +1,6 @@
 #include "ros2/ros2_node.h"
 #include <fstream>
+#include "planner/controller/mpc.h"
 #include "utils/logger.hpp"
 #include "utils/plotter.hpp"
 #include "utils/type_utils.hpp"
@@ -27,6 +28,7 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
     //fsm_(config.fsm_config),
     plotter_(),
     ma_map_(std::make_shared<ma_map::MaMap>(config.map_params_path)),
+    mpc_(config.mpc_params),
     omni_lmpc_(config.lmpc_param) {
     start_time_ = std::chrono::steady_clock::now();
     fsm_replanner.set_param(config.planner_config);
@@ -85,77 +87,125 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
     }
 }
 void GlobalPlanner2d::controller_callback() {
-    if (!current_XYTheta.has_value()) {
-        // spdlog::warn("[controller_callback] no current_XYtheta");
-        return;
-    }
-    // if (!trajectory_.isInitialized()) {
-    //     // spdlog::warn("轨迹未初始化，等待规划...");
-    //     return;
-    // }
-    if (config.is_minco == true) {
-        if (minco_trajectory_.getPieceNum() == 0) {
-            return;
-        }
-    } else {
-        if (trajectory_ppoly_.getNumSegments() == 0) return;
-    }
-    // 距离目标检查（优先）
-    // 位置阈值 0.08m:比 MPC 停车半径(0.05)略宽,避免 MPC 在 0.06m 处爬行导致
-    // 到位阶段永不触发;进入后若航向未对齐,原地旋转对齐后再停
-    if ((current_XYTheta->head<2>() - goal_pose->p.head<2>()).norm() < 0.08) {
-        // 目标带 yaw 且航向未对齐 -> 纯旋转收尾(MPC 的 Q_theta=0.1 权重低,残差大)
-        const double yaw_err = std::remainder(goal_pose->yaw - (*current_XYTheta)(2), 2.0 * M_PI);
-        if (std::abs(yaw_err) > 0.03) {
-            // 到位旋转:大误差段 P 控制 + 最小转速保证(避免纯 P 尾段指数爬行、
-            // “最后几度磨半天”);小误差段纯 P 平滑收敛(强制最小转速会过冲振荡)
-            constexpr double kYaw = 4.0; // 角速度增益
-            constexpr double kWMax = 3.0; // 最大角速度 rad/s(与 lmpc.u_max_w=4.0 同量级)
-            constexpr double kWMin = 0.6; // 最小角速度 rad/s(误差 >0.08 rad 时生效)
-            constexpr double kBang = 0.08; // 大误差/小误差切换阈值 rad
-            double w = kYaw * yaw_err;
-            if (std::abs(yaw_err) > kBang) {
-                const double w_abs = std::max(kWMin, std::min(kWMax, std::abs(w)));
-                w = std::copysign(w_abs, yaw_err);
-            } else {
-                w = std::max(-kWMax, std::min(kWMax, w));
-            }
-            geometry_msgs::msg::Twist rot;
-            rot.angular.z = w;
+    if (!current_XYTheta.has_value()) return;
+    if (!current_pose.has_value()) return;
 
-            cmd_vel_pub_->publish(rot);
-            return;
-        }
-
-        geometry_msgs::msg::Twist stop;
-        cmd_vel_pub_->publish(stop);
-        logger::ros2->debug("到达目标点，停止控制");
+    if (!ma_traj_interface_ || !ma_traj_interface_->valid()) {
         return;
     }
 
-    // 更新状态并求解（参考游标由 MPC 内部按机器人实际进度跟踪，
-    //    不再依赖墙钟时间，避免落后参考时反复切角、偏差累积）
-    std::vector<Eigen::Vector3d> predicted;
-    if (config.is_minco == true) {
-        omni_lmpc_.update_current_pose(*current_XYTheta);
-        predicted = omni_lmpc_.slover(minco_trajectory_);
-    } else {
-        omni_lmpc_.update_current_pose(*current_XYTheta);
-        predicted = omni_lmpc_.slover(trajectory_ppoly_);
-    }
-    if (predicted.empty()) {
-        logger::ros2->warn("MPC 求解失败");
+    // 当前状态
+    Eigen::Matrix<double, 6, 1> x0;
+    x0 << current_XYTheta->x(), current_XYTheta->y(),
+        current_XYTheta->z(), // yaw
+        current_pose->v.x(), current_pose->v.y(), current_pose->wz;
+
+    // 用当前位置更新游标
+    Eigen::Vector2d pos(current_XYTheta->x(), current_XYTheta->y());
+    t_track_ = ma_traj_interface_->update_track_time(pos, t_track_);
+
+    double t_now = t_track_;
+    
+    Eigen::Matrix<double, 3, 1> u_cmd;
+    std::vector<Eigen::Matrix<double, 6, 1>> predicted_states;
+    std::vector<Eigen::Matrix<double, 3, 1>> predicted_inputs;
+
+    if (!mpc_.solve(x0, t_now, u_cmd, predicted_states, predicted_inputs)) {
         return;
     }
 
-    // 发布控制指令
-    Eigen::Vector3d u_cmd = omni_lmpc_.u_k;
+    // 用预测的下一时刻状态作为速度指令
+    if (predicted_states.size() < 2) {
+        return;
+    }
+
+    double vx_world = predicted_states[1](3);
+    double vy_world = predicted_states[1](4);
+    double wz = predicted_states[1](5);
+
+    double yaw = x0(2);
+    double c = std::cos(yaw);
+    double s = std::sin(yaw);
+
     geometry_msgs::msg::Twist twist;
-    twist.linear.x = u_cmd.x();
-    twist.linear.y = u_cmd.y();
-    twist.angular.z = u_cmd.z();
+    twist.linear.x = c * vx_world + s * vy_world;
+    twist.linear.y = -s * vx_world + c * vy_world;
+    twist.angular.z = wz;
+
     cmd_vel_pub_->publish(twist);
 }
+// void GlobalPlanner2d::controller_callback() {
+//     if (!current_XYTheta.has_value()) {
+//         // spdlog::warn("[controller_callback] no current_XYtheta");
+//         return;
+//     }
+//     // if (!trajectory_.isInitialized()) {
+//     //     // spdlog::warn("轨迹未初始化，等待规划...");
+//     //     return;
+//     // }
+//     if (config.is_minco == true) {
+//         if (minco_trajectory_.getPieceNum() == 0) {
+//             return;
+//         }
+//     } else {
+//         if (trajectory_ppoly_.getNumSegments() == 0) return;
+//     }
+//     // 距离目标检查（优先）
+//     // 位置阈值 0.08m:比 MPC 停车半径(0.05)略宽,避免 MPC 在 0.06m 处爬行导致
+//     // 到位阶段永不触发;进入后若航向未对齐,原地旋转对齐后再停
+//     if ((current_XYTheta->head<2>() - goal_pose->p.head<2>()).norm() < 0.08) {
+//         // 目标带 yaw 且航向未对齐 -> 纯旋转收尾(MPC 的 Q_theta=0.1 权重低,残差大)
+//         const double yaw_err = std::remainder(goal_pose->yaw - (*current_XYTheta)(2), 2.0 * M_PI);
+//         if (std::abs(yaw_err) > 0.03) {
+//             // 到位旋转:大误差段 P 控制 + 最小转速保证(避免纯 P 尾段指数爬行、
+//             // “最后几度磨半天”);小误差段纯 P 平滑收敛(强制最小转速会过冲振荡)
+//             constexpr double kYaw = 4.0; // 角速度增益
+//             constexpr double kWMax = 3.0; // 最大角速度 rad/s(与 lmpc.u_max_w=4.0 同量级)
+//             constexpr double kWMin = 0.6; // 最小角速度 rad/s(误差 >0.08 rad 时生效)
+//             constexpr double kBang = 0.08; // 大误差/小误差切换阈值 rad
+//             double w = kYaw * yaw_err;
+//             if (std::abs(yaw_err) > kBang) {
+//                 const double w_abs = std::max(kWMin, std::min(kWMax, std::abs(w)));
+//                 w = std::copysign(w_abs, yaw_err);
+//             } else {
+//                 w = std::max(-kWMax, std::min(kWMax, w));
+//             }
+//             geometry_msgs::msg::Twist rot;
+//             rot.angular.z = w;
+
+//             cmd_vel_pub_->publish(rot);
+//             return;
+//         }
+
+//         geometry_msgs::msg::Twist stop;
+//         cmd_vel_pub_->publish(stop);
+//         logger::ros2->debug("到达目标点，停止控制");
+//         return;
+//     }
+
+//     // 更新状态并求解（参考游标由 MPC 内部按机器人实际进度跟踪，
+//     //    不再依赖墙钟时间，避免落后参考时反复切角、偏差累积）
+//     std::vector<Eigen::Vector3d> predicted;
+//     if (config.is_minco == true) {
+//         omni_lmpc_.update_current_pose(*current_XYTheta);
+//         predicted = omni_lmpc_.slover(minco_trajectory_);
+//     } else {
+//         omni_lmpc_.update_current_pose(*current_XYTheta);
+//         predicted = omni_lmpc_.slover(trajectory_ppoly_);
+//     }
+//     if (predicted.empty()) {
+//         logger::ros2->warn("MPC 求解失败");
+//         return;
+//     }
+
+//     // 发布控制指令
+//     Eigen::Vector3d u_cmd = omni_lmpc_.u_k;
+//     geometry_msgs::msg::Twist twist;
+//     twist.linear.x = u_cmd.x();
+//     twist.linear.y = u_cmd.y();
+//     twist.angular.z = u_cmd.z();
+//     cmd_vel_pub_->publish(twist);
+// }
 
 void GlobalPlanner2d::planner_callback() {
     GlobalPlanner2d::plan_omni();
@@ -185,12 +235,20 @@ void GlobalPlanner2d::plan_omni() {
             visualizer.visualize(result->ma_spline_traj, route);
             // // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
             if (result->ma_spline_traj.success && result->ma_spline_traj.xy_spline.isInitialized()) {
+                // 保留旧接口也可以，方便可视化/调试
                 trajectory_ppoly_ = result->ma_spline_traj.xy_spline.getTrajectory();
 
+                // 新 MPC 使用统一的轨迹接口
+                ma_traj_interface_ = std::make_shared<control::MaSplineTrajectoryInterface>(result->ma_spline_traj);
+
+                mpc_.set_trajectory(ma_traj_interface_);
+
+                // 初始化游标到离当前位置最近的轨迹点
                 if (current_XYTheta.has_value()) {
-                    omni_lmpc_.initialize_track(*current_XYTheta, trajectory_ppoly_);
+                    Eigen::Vector2d pos(current_XYTheta->x(), current_XYTheta->y());
+                    t_track_ = ma_traj_interface_->nearest_time(pos);
                 } else {
-                    omni_lmpc_.reset_track();
+                    t_track_ = 0.0;
                 }
             }
         }

@@ -3,6 +3,14 @@
 #include "utils/logger.hpp"
 #include "utils/type_utils.hpp"
 namespace replan {
+// 文件内使用的折线碰撞检测辅助函数（不新增类成员，避免只读头文件不同步）
+static bool check_path_collision(
+    const std::vector<Eigen::Vector2d>& path,
+    const grid_map::GridMap& grid_map,
+    const double& safe_threshold,
+    const double step
+);
+
 auto FsmReplan::minco_plan(
     const utils::RobotState& goal_pose,
     const utils::RobotState& current_pose,
@@ -14,20 +22,28 @@ auto FsmReplan::minco_plan(
         result_.path_state = path_state_;
         return result_;
     }
+
     const auto safe_threshold = planner_config_.path_planning_params.safe_threshold;
+
     // 触发重规划的三个条件（满足任一即重规划）：
     //   1. 路径碰障（A* 原始网格路径 + 优化后航点路径，见 checkCollision）
     //   2. 路径年龄超过 replan_interval_
     //   3. 机器人偏离参考路径超过 replan_lateral_dev_
+
     Eigen::Vector2d diff = (old_goal_pose_.p - goal_pose.p).head<2>();
     Eigen::Vector2d threshold = planner_config_.replan_params.goal_deviation.head<2>();
-    if (diff.cwiseAbs().x() > threshold.x() && diff.cwiseAbs().y() > threshold.y()) {
+    if (diff.cwiseAbs().x() > threshold.x() || diff.cwiseAbs().y() > threshold.y()) {
         // 任一轴超出阈值即触发重规划
         need_replan_ = true;
     }
-    //路径碰障（jps优化后航点路径)
+    //路径碰障（jps优化后航点路径 + 实际跟踪的 MINCO 样条轨迹）
+    const double collision_step = std::max(planner_config_.path_planning_params.dense_sample_resolution, 0.02);
+    const double hard_clearance = std::max(0.05, safe_threshold * 0.5);
+
     const bool path_collision = result_.planning_traj.optimized_path.empty()
-        || check_collision(result_.planning_traj, *grid_map, safe_threshold);
+        || check_collision(result_.planning_traj, *grid_map, hard_clearance)
+        || (!last_opt_path_.empty() && check_path_collision(last_opt_path_, *grid_map, hard_clearance, collision_step));
+
     if (path_collision) {
         need_replan_ = true;
     }
@@ -114,31 +130,62 @@ auto FsmReplan::lateral_deviation(const Eigen::Vector2d& pos, const std::vector<
     return min_dist;
 }
 
+static bool check_path_collision(
+    const std::vector<Eigen::Vector2d>& path,
+    const grid_map::GridMap& grid_map,
+    const double& safe_threshold,
+    const double step
+) {
+    if (path.empty()) {
+        return false;
+    }
+    auto is_unsafe = [&](const Eigen::Vector2d& pos) -> bool {
+        // Points outside map are considered collision-free
+        if (!grid_map.isInsideMap(pos)) {
+            return false;
+        }
+        // Points inside map use safety distance check
+        return grid_map.getDistance(pos) < safe_threshold;
+    };
+
+    for (size_t i = 0; i < path.size(); ++i) {
+        if (is_unsafe(path[i])) {
+            return true;
+        }
+        if (i + 1 >= path.size()) {
+            continue;
+        }
+        // 只检查航点会漏掉长直线段中间新增的动态障碍物，
+        // 因此沿每一段按 dense_sample_resolution 再采样检查。
+        const Eigen::Vector2d a = path[i];
+        const Eigen::Vector2d b = path[i + 1];
+        const double len = (b - a).norm();
+        if (len < 1e-9) {
+            continue;
+        }
+        const int n = std::max(1, static_cast<int>(std::ceil(len / step)));
+        for (int j = 1; j < n; ++j) {
+            const double r = static_cast<double>(j) / n;
+            if (is_unsafe(a + r * (b - a))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 auto FsmReplan::check_collision(
     path_planning::PathPostProcessing::Trajectory traj,
     const grid_map::GridMap& grid_map,
     const double& safe_threshold
 ) -> bool {
     // 同时检查 planning原始网格路径与优化后航点路径：
-    // 原始路径逐格密集，可发现两个优化航点之间被新障碍挡住的情况
-    std::vector<std::vector<Eigen::Vector2d>> paths;
-    paths.push_back(traj.optimized_path);
-    //paths.push_back(traj.raw_path);
-    for (const auto& path: paths) {
-        // Points outside map are considered collision-free
-        for (auto pos: path) {
-            if (!grid_map.isInsideMap(pos)) {
-                continue;
-            }
-
-            // Points inside map use safety distance check
-            if (grid_map.getDistance(pos) < safe_threshold) {
-                return true;
-            };
-        }
-    }
-    return false;
-};
+    // 原始路径可发现两个优化航点之间被新障碍挡住的情况；
+    // 再对每段折线做密集采样，避免长直线中间漏检。
+    const double step = std::max(planner_config_.path_planning_params.dense_sample_resolution, 0.02);
+    return check_path_collision(traj.optimized_path, grid_map, safe_threshold, step)
+        || check_path_collision(traj.raw_path, grid_map, safe_threshold, step);
+}
 auto FsmReplan::get_safe_pos(
     const Eigen::Vector2d& pos,
     const grid_map::GridMap& grid_map,
@@ -728,4 +775,8 @@ auto FsmReplan::sample_minco_trajectory(Trajectory<5, 2> spline, const double dt
     }
     return sample_trajectory;
 }
+
+// sample_ma_spline_trajectory is intentionally not defined here:
+// it would require a matching declaration in the read-only header.
+
 }

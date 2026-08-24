@@ -91,17 +91,19 @@ public:
             result_.path_state = path_state_;
             return result_;
         }
+
         const auto safe_threshold = planner_config_.path_planning_params.safe_threshold;
+        const double hard_clearance = std::max(0.05, safe_threshold * 0.2);
 
         Eigen::Vector2d diff = (old_goal_pose_.p - goal_pose.p).head<2>();
         Eigen::Vector2d threshold = planner_config_.replan_params.goal_deviation.head<2>();
-        if (diff.cwiseAbs().x() > threshold.x() && diff.cwiseAbs().y() > threshold.y()) {
-            // 任一轴超出阈值即触发重规划
+        if (diff.cwiseAbs().x() > threshold.x() || diff.cwiseAbs().y() > threshold.y()) {
             need_replan_ = true;
         }
-        //路径碰障（jps优化后航点路径)
+
         const bool path_collision = result_.planning_traj.optimized_path.empty()
-            || check_collision(result_.planning_traj, *grid_map, safe_threshold);
+            || check_collision(result_.planning_traj, *grid_map, hard_clearance);
+
         if (path_collision) {
             need_replan_ = true;
         }

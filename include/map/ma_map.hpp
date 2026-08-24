@@ -93,6 +93,8 @@ public:
         }
         occupancy_2d = dynamic_2d_occ_.cwiseMax(global_2d_occ_) ;
         grid_map_ptr_->setMap(occupancy_2d);
+        //grid_map_ptr_->inflate(0.02);
+        
     };
     auto update_odom(const rog_map::Pose& pose) -> void {
         rog_map_ptr_->updateRobotState(pose);
@@ -155,6 +157,7 @@ private:
         //     output.emplace_back(pt);
         // }
     }
+    
 private:
     rog_map::Pose pc_pose_;
     rog_map::PointCloud cloud_;

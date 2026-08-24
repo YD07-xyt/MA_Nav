@@ -1,7 +1,7 @@
 #pragma once
-
-#include "SplineTrajectory/SplineOptimizer.hpp"
 #include "planner/traj_optimize/esdf_Interface.hpp"
+#include "SplineTrajectory/SplineOptimizer.hpp"
+
 
 #include <Eigen/Core>
 #include <cmath>

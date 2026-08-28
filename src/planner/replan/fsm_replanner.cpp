@@ -21,6 +21,7 @@ auto FsmReplan::plan(
         result_.path_state = path_state_;
         return result_;
     }
+    
     // if(grid_map->is_tunnel(current_pose.p.head<2>())){
     //     logger::fsm_replan->error("now robot in tunnel");
     // }
@@ -71,7 +72,7 @@ auto FsmReplan::plan(
         auto trajectory = path_planning.path_planning(start, goal, 5000);
 
         if (!trajectory.has_value()) {
-            logger::fsm_replan->warn("planning failed");
+            logger::warn(logger::fsm_replan,"planning failed");
             need_replan_ = true;
             return tl::make_unexpected(PathError::PLANNING_FAILED);
         }
@@ -80,7 +81,7 @@ auto FsmReplan::plan(
         // 优化失败或安全检查不过时保持 path_planning 原始轨迹,安全兜底。
         result_.planning_traj = trajectory.value();
         // [临时诊断] 打印 raw_path / optimized_path 点数,确认直线/近距离时的短路情况
-        logger::fsm_replan->info(
+        logger::info(logger::fsm_replan,
             "path points: raw={} optimized={} total_time={:.2f}s",
             result_.planning_traj.raw_path.size(),
             result_.planning_traj.optimized_path.size(),
@@ -116,17 +117,17 @@ auto FsmReplan::one_plan(
 
     auto trajectory = path_planning.path_planning(start, goal, 5000);
     if (!trajectory.has_value()) {
-        logger::fsm_replan->warn("planning failed");
+        logger::warn(logger::fsm_replan,"planning failed");
         return tl::make_unexpected(PathError::PLANNING_FAILED);
     }
-    logger::fsm_replan->info(
+    logger::info(logger::fsm_replan,
         "path points: raw={} optimized={} total_time={:.2f}s",
         result_.planning_traj.raw_path.size(),
         result_.planning_traj.optimized_path.size(),
         result_.planning_traj.total_time
     );
     const auto& timed = result_.planning_traj.timed_trajectory;
-    logger::fsm_replan->info(
+    logger::info(logger::fsm_replan,
         "timed_trajectory: size={}, first_t={:.3f}, last_t={:.3f}, total_time={:.3f}",
         timed.size(),
         timed.empty() ? -1.0 : timed.front().time,
@@ -207,7 +208,7 @@ auto FsmReplan::minco_plan(
 
         auto trajectory = path_planning.path_planning(start, goal, 5000);
         if (!trajectory.has_value()) {
-            logger::fsm_replan->warn("planning failed");
+            logger::warn(logger::fsm_replan,"planning failed");
             need_replan_ = true;
             return tl::make_unexpected(PathError::PLANNING_FAILED);
         }
@@ -216,7 +217,7 @@ auto FsmReplan::minco_plan(
         // 优化失败或安全检查不过时保持 path_planning 原始轨迹,安全兜底。
         result_.planning_traj = trajectory.value();
         // [临时诊断] 打印 raw_path / optimized_path 点数,确认直线/近距离时的短路情况
-        logger::fsm_replan->info(
+        logger::info(logger::fsm_replan,
             "path points: raw={} optimized={} total_time={:.2f}s",
             result_.planning_traj.raw_path.size(),
             result_.planning_traj.optimized_path.size(),
@@ -385,7 +386,7 @@ auto FsmReplan::find_projection_on_trajectory(
 
     // 如果轨迹已经完全过期，返回无效结果
     if (elapsed_time >= total_duration) {
-        logger::fsm_replan->warn("轨迹已过期: elapsed={:2f} s, duration={:2f} s", elapsed_time, total_duration);
+        logger::warn(logger::fsm_replan,"轨迹已过期: elapsed={:2f} s, duration={:2f} s", elapsed_time, total_duration);
         return result; // valid = false
     }
 
@@ -398,7 +399,7 @@ auto FsmReplan::find_projection_on_trajectory(
 
     // 如果可搜索范围太小，返回无效
     if (search_end - search_start < planner_config_.replan_params.projection_search_resolution) {
-        logger::fsm_replan->warn("轨迹剩余时间太短，无法进行投影搜索");
+        logger::warn(logger::fsm_replan,"轨迹剩余时间太短，无法进行投影搜索");
         return result; // valid = false
     }
 
@@ -453,7 +454,7 @@ auto FsmReplan::find_projection_on_trajectory(
     result.position = traj.getPos(best_time);
     result.velocity = traj.getVel(best_time);
     result.acceleration = traj.getAcc(best_time); // S=3 热启动：获取加速度
-    logger::fsm_replan->info(
+    logger::info(logger::fsm_replan,
         "轨迹投影结果: t={:3f} s, dist={:3f} m, pos=({:2f}, {:2f}), "
         "vel=({:2f}, {:2f}), acc=({:2f}, {:2f})",
         result.projection_time,
@@ -670,10 +671,9 @@ auto FsmReplan::minco_optimize(
         }
 
         if (cnt > 0) {
-            logger::fsm_replan
-                ->info("MINCO path: max_spd={:.3f}, min_spd={:.3f}, avg_spd={:.3f}", max_spd, min_spd, sum_spd / cnt);
+            logger::info(logger::fsm_replan,"MINCO path: max_spd={:.3f}, min_spd={:.3f}, avg_spd={:.3f}", max_spd, min_spd, sum_spd / cnt);
         } else {
-            logger::fsm_replan->warn("MINCO trajectory has no samples");
+            logger::warn(logger::fsm_replan,"MINCO trajectory has no samples");
         }
     }
     last_trajectory_ = optimizedTraj;

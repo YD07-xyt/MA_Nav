@@ -236,11 +236,12 @@ void GlobalPlanner2d::planner_callback() {
 }
 void GlobalPlanner2d::plan_omni() {
     if (this->goal_pose == std::nullopt) {
-        logger::ros2->debug("no goal");
+
+        logger::debug(logger::ros2,"no goal");
         return;
     }
     if (this->current_pose == std::nullopt) {
-        logger::ros2->debug("no current_pose");
+        logger::debug(logger::ros2,"no current_pose");
         return;
     }
 
@@ -366,7 +367,8 @@ void GlobalPlanner2d::pub_callback() {
 }
 
 void GlobalPlanner2d::target_callback(const geometry_msgs::msg::PoseStamped::SharedPtr& msg) {
-    logger::ros2->info(
+    logger::info(
+        logger::ros2,
         "Received target pose with position ({:2f},{:2f},{:2f})",
         msg->pose.position.x,
         msg->pose.position.y,
@@ -378,17 +380,18 @@ void GlobalPlanner2d::target_callback(const geometry_msgs::msg::PoseStamped::Sha
         temp_goal_pose.p = goal;
         temp_goal_pose.yaw = atan2(msg->pose.orientation.z, msg->pose.orientation.w) * 2.0;
         goal_pose = temp_goal_pose;
+        logger::info(logger::ros2, "set goal success");
 
-        logger::ros2->info("set goal success");
     } else {
-        logger::ros2->warn("map no init");
+        logger::warn(logger::ros2, "map no init");
     }
     return;
 }
 
 void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStamped::SharedPtr& msg) {
     clicked_points_.push_back(msg->point);
-    logger::ros2->info(
+    logger::info(
+        logger::ros2,
         "Received rviz2 clicked point ({:.2f},{:.2f},{:.2f}), accumulated {}/4",
         msg->point.x,
         msg->point.y,
@@ -406,7 +409,7 @@ void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStam
 
     // 在地图的标记层上标记为“隧道区”
     {
-        std::unique_lock<std::shared_mutex> lock(map_mutex_); 
+        std::unique_lock<std::shared_mutex> lock(map_mutex_);
         auto grid_map = ma_map_->get_grid_map();
         grid_map->semantics_polygon_region(polygon, grid_map::GridMap::Semantics::TUNNEL);
     }
@@ -437,13 +440,13 @@ void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStam
     visualization_msgs::msg::MarkerArray regions;
     regions.markers = clicked_regions_;
     clicked_region_pub_->publish(regions);
-    logger::ros2->info("Published clicked region #{}", region.id);
+    logger::info(logger::ros2, "Published clicked region #{}", region.id);
 }
 
 void GlobalPlanner2d::load_global_map(const std::string& pgm_path) {
     std::ifstream f(pgm_path, std::ios::binary);
     if (!f.is_open()) {
-        logger::ros2->error("Failed to open global map: {}", pgm_path);
+        logger::error(logger::ros2, "Failed to open global map: {}", pgm_path);
         return;
     }
     std::string magic;
@@ -451,7 +454,7 @@ void GlobalPlanner2d::load_global_map(const std::string& pgm_path) {
     f >> magic >> w >> h >> maxval;
     f.get();
     if (magic != "P5" || maxval != 255) {
-        logger::ros2->error("Only P5 binary PGM (maxval=255) supported");
+        logger::error(logger::ros2, "Only P5 binary PGM (maxval=255) supported");
         return;
     }
     // 读入全部像素，之后按世界坐标做任意像素查询
@@ -470,7 +473,8 @@ void GlobalPlanner2d::load_global_map(const std::string& pgm_path) {
     try {
         YAML::Node root = YAML::LoadFile(yaml_path);
         if (!root["resolution"] || !root["origin"]) {
-            logger::ros2->error(
+            logger::error(
+                logger::ros2,
                 "Global map yaml {} missing resolution/origin, load aborted (size mismatch would misalign map)",
                 yaml_path
             );
@@ -479,16 +483,18 @@ void GlobalPlanner2d::load_global_map(const std::string& pgm_path) {
         pgm_res = root["resolution"].as<double>();
         auto origin = root["origin"].as<std::vector<double>>();
         if (origin.size() < 2 || pgm_res <= 0.0) {
-            logger::ros2->error("Global map yaml {} has invalid resolution/origin, load aborted", yaml_path);
+            logger::error(logger::ros2, "Global map yaml {} has invalid resolution/origin, load aborted", yaml_path);
             return;
         }
         pgm_origin << origin[0], origin[1];
     } catch (const std::exception& e) {
-        logger::ros2->error(
+        logger::error(
+            logger::ros2,
             "Failed to parse global map yaml {} ({}), load aborted (size mismatch would misalign map)",
             yaml_path,
             e.what()
         );
+
         return;
     }
 
@@ -525,7 +531,8 @@ void GlobalPlanner2d::load_global_map(const std::string& pgm_path) {
         }
     }
     ma_map_->set_global_map(global);
-    logger::ros2->info(
+    logger::info(
+        logger::ros2,
         "Loaded global map {}x{} (res={:.3f}, origin=({:.2f},{:.2f})) -> current grid {}x{} (res={:.3f}), {} occupied cells projected",
         pgm_cols,
         pgm_rows,
@@ -563,6 +570,6 @@ void GlobalPlanner2d::save_global_map(const std::string& map_dir) {
     y << "mode: trinary\n";
     y.close();
 
-    logger::ros2->info("Saved global map {}x{} -> {}", w, h, map_dir);
+    logger::info(logger::ros2, "Saved global map {}x{} -> {}", w, h, map_dir);
 }
 } // namespace planner

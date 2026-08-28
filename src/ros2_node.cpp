@@ -1,5 +1,6 @@
 #include "ros2/ros2_node.h"
 #include <fstream>
+#include "map/grid_map.hpp"
 #include "planner/controller/mpc.h"
 #include "utils/logger.hpp"
 #include "utils/plotter.hpp"
@@ -26,28 +27,65 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
     mapInitialized(false),
     visualizer(nh_),
     //fsm_(config.fsm_config),
-    plotter_(),
     ma_map_(std::make_shared<ma_map::MaMap>(config.map_params_path)),
     mpc_(config.mpc_params),
     omni_lmpc_(config.lmpc_param) {
     start_time_ = std::chrono::steady_clock::now();
     fsm_replanner.set_param(config.planner_config);
 
+    map_cb_group_ = nh->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    planner_cb_group_ = nh->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    control_cb_group_ = nh->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+    // 2. 订阅者配置选项
+    rclcpp::SubscriptionOptions opts_map;
+    opts_map.callback_group = map_cb_group_;
+    rclcpp::SubscriptionOptions opts_odom;
+    opts_odom.callback_group = map_cb_group_; // 里程计也更新地图，放入地图组避免同时写
+    rclcpp::SubscriptionOptions opts_target;
+    opts_target.callback_group = control_cb_group_; // 目标点很轻量，放控制组
+
+    // 3. 创建订阅者（绑定回调组）
     map_sub_ = nh->create_subscription<sensor_msgs::msg::PointCloud2>(
         config.map_topic_name,
         rclcpp::SensorDataQoS(),
-        [this](const sensor_msgs::msg::PointCloud2::SharedPtr msg) { GlobalPlanner2d::map_callback(msg); }
+        [this](const sensor_msgs::msg::PointCloud2::SharedPtr msg) { GlobalPlanner2d::map_callback(msg); },
+        opts_map
     );
+
     odom_sub_ = nh->create_subscription<nav_msgs::msg::Odometry>(
         config.odom_topic_name,
         rclcpp::QoS(10),
-        [this](const nav_msgs::msg::Odometry::SharedPtr msg) { GlobalPlanner2d::odom_callback(msg); }
+        [this](const nav_msgs::msg::Odometry::SharedPtr msg) { GlobalPlanner2d::odom_callback(msg); },
+        opts_odom
     );
+
     target_sub_ = nh->create_subscription<geometry_msgs::msg::PoseStamped>(
         config.target_topic_name,
         rclcpp::QoS(10),
-        [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { target_callback(msg); }
+        [this](const geometry_msgs::msg::PoseStamped::SharedPtr msg) { target_callback(msg); },
+        opts_target
     );
+
+    // 4. 定时器（同样绑定回调组）
+    planner_timer_ = nh->create_wall_timer(
+        std::chrono::milliseconds(33),
+        [this]() { planner_callback(); },
+        planner_cb_group_ // 规划器独立组
+    );
+
+    controller_timer_ = nh->create_wall_timer(
+        std::chrono::milliseconds(33),
+        [this]() { controller_callback(); },
+        control_cb_group_ // 控制器独立组
+    );
+
+    pub_viz_timer_ = nh->create_wall_timer(
+        std::chrono::milliseconds(10),
+        [this]() { pub_callback(); },
+        control_cb_group_ // 可视化放控制组（轻量）
+    );
+
     // 接收 rviz2 "Publish Point" 工具点选的点（geometry_msgs/PointStamped，默认 /clicked_point），
     // 每 4 个点连成一个封闭四边形区域并发布到 /ma_nav/clicked_regions 可视化
     clickedPoint_sub_ = nh->create_subscription<geometry_msgs::msg::PointStamped>(
@@ -55,28 +93,14 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
         rclcpp::QoS(10),
         [this](const geometry_msgs::msg::PointStamped::SharedPtr msg) { clicked_point_callback(msg); }
     );
-    cmd_vel_pub_ = nh->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel_chassis", 10);
+    cmd_vel_pub_ = nh->create_publisher<geometry_msgs::msg::Twist>(config.cmd_vel_name, 10);
     clicked_region_pub_ = nh->create_publisher<visualization_msgs::msg::MarkerArray>("/ma_nav/clicked_regions", 10);
-
-    // 每 0.1 秒执行一次
-    planner_timer_ = nh->create_wall_timer(
-        std::chrono::milliseconds(33), // 时间间隔参数
-        [&]() { planner_callback(); } // 回调函数
-    );
-    pub_viz_timer_ = nh->create_wall_timer(
-        std::chrono::milliseconds(10), // 时间间隔参数
-        [&]() { pub_callback(); } // 回调函数
-    );
-    controller_timer_ = nh->create_wall_timer(
-        std::chrono::milliseconds(33), // 时间间隔参数
-        [&]() { controller_callback(); } // 回调函数
-    );
 
     // 保存/加载全局地图的 ROS2 服务
     save_map_srv_ = nh->create_service<std_srvs::srv::Trigger>(
-        "/save_global_map",
+        config.save_map_srv_topic,
         [this](const std_srvs::srv::Trigger::Request::SharedPtr, std_srvs::srv::Trigger::Response::SharedPtr res) {
-            save_global_map("/home/xyt/map/src/gcopter/map");
+            save_global_map(config.save_global_map_path);
             res->success = true;
             res->message = "Global map saved to /home/xyt/map/src/gcopter/map";
         }
@@ -105,7 +129,7 @@ void GlobalPlanner2d::controller_callback() {
     t_track_ = ma_traj_interface_->update_track_time(pos, t_track_);
 
     double t_now = t_track_;
-    
+
     Eigen::Matrix<double, 3, 1> u_cmd;
     std::vector<Eigen::Matrix<double, 6, 1>> predicted_states;
     std::vector<Eigen::Matrix<double, 3, 1>> predicted_inputs;
@@ -319,7 +343,6 @@ void GlobalPlanner2d::map_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     grid_map_ = ma_map_->get_grid_map();
     visualizer.visualize_occupied_map(*grid_map_);
     mapInitialized = true;
-    //visualizer.visualizeMap(pc);
 }
 void GlobalPlanner2d::pub_callback() {
     static auto last_pub = std::chrono::steady_clock::now();
@@ -336,7 +359,6 @@ void GlobalPlanner2d::pub_callback() {
         }
     }
     visualizer.map_viz_callback(*ma_map_);
-    // GridMap 占用栅格与 2D ESDF 的 OccupancyGrid 可视化（与 ROGMap 同频，受 viz_time_rate 限频）
     if (grid_map_) {
         visualizer.visualize_occupied_grid(*grid_map_);
         visualizer.visualize_esdf_grid(*grid_map_);
@@ -375,6 +397,18 @@ void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStam
     );
     if (clicked_points_.size() < 4) {
         return;
+    }
+    // 构建多边形顶点（Eigen 向量）
+    std::vector<Eigen::Vector2d> polygon;
+    for (const auto& p: clicked_points_) {
+        polygon.emplace_back(p.x, p.y);
+    }
+
+    // 在地图的标记层上标记为“隧道区”
+    {
+        std::unique_lock<std::shared_mutex> lock(map_mutex_); 
+        auto grid_map = ma_map_->get_grid_map();
+        grid_map->semantics_polygon_region(polygon, grid_map::GridMap::Semantics::TUNNEL);
     }
 
     // 每 4 个点连成一个封闭四边形：p0->p1->p2->p3->p0

@@ -60,6 +60,14 @@ class GlobalPlanner2d {
 private:
   Config config;
   rclcpp::Node::SharedPtr nh;
+private:
+  rclcpp::CallbackGroup::SharedPtr map_cb_group_;
+  rclcpp::CallbackGroup::SharedPtr planner_cb_group_;
+  rclcpp::CallbackGroup::SharedPtr control_cb_group_;  // 控制器 + 可视化
+
+  // 保护 ma_map_ 的读写锁（读共享，写独占）
+  mutable std::shared_mutex map_mutex_;
+
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr map_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr target_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr clickedPoint_sub_;

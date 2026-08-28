@@ -10,7 +10,138 @@ static bool check_path_collision(
     const double& safe_threshold,
     const double step
 );
+auto FsmReplan::plan(
+    const utils::RobotState& goal_pose,
+    const utils::RobotState& current_pose,
+    std::shared_ptr<grid_map::GridMap> grid_map
+) -> path {
+    // 起点≈终点（机器人已到达目标附近）：直接退出，不规划。
+    if ((current_pose.p.head<2>() - goal_pose.p.head<2>()).norm() < planner_config_.replan_params.goal_reached_radius) {
+        path_state_ = PathState::SUCCESSED;
+        result_.path_state = path_state_;
+        return result_;
+    }
+    // if(grid_map->is_tunnel(current_pose.p.head<2>())){
+    //     logger::fsm_replan->error("now robot in tunnel");
+    // }
 
+
+    const auto safe_threshold = planner_config_.path_planning_params.safe_threshold;
+    const double hard_clearance = std::max(0.05, safe_threshold * 0.2);
+
+    Eigen::Vector2d diff = (old_goal_pose_.p - goal_pose.p).head<2>();
+    Eigen::Vector2d threshold = planner_config_.replan_params.goal_deviation.head<2>();
+    if (diff.cwiseAbs().x() > threshold.x() || diff.cwiseAbs().y() > threshold.y()) {
+        need_replan_ = true;
+    }
+
+    const bool path_collision = result_.planning_traj.optimized_path.empty()
+        || check_collision(result_.planning_traj, *grid_map, hard_clearance);
+
+    if (path_collision) {
+        need_replan_ = true;
+    }
+
+    //机器人偏离参考路径超过 replan_lateral_dev_
+    const double lateral_dev = lateral_deviation(
+        Eigen::Vector2d(current_pose.p.x(), current_pose.p.y()),
+        last_opt_path_.empty() ? result_.planning_traj.optimized_path : last_opt_path_
+    );
+
+    if (lateral_dev > planner_config_.replan_params.replan_lateral_dev) {
+        need_replan_ = true;
+    }
+    // 暂时不考虑加入 路径年龄超过 replan_interval_
+    if (need_replan_) {
+        utils::TimeConsuming timer("planner_fsm", false); // true 表示允许打印
+        path_planning.set_map(*grid_map);
+
+        Eigen::Vector2d start(current_pose.p.x(), current_pose.p.y());
+        Eigen::Vector2d goal(goal_pose.p.x(), goal_pose.p.y());
+
+        // 若起点/终点过于靠近障碍物，沿 ESDF 梯度外推到安全点，保证可规划
+        start = get_safe_pos(start, *grid_map, safe_threshold);
+        goal = get_safe_pos(goal, *grid_map, safe_threshold);
+
+        path_planning.set_use_jps(true);
+
+        const Eigen::Vector3d& current_vel = Eigen::Vector3d(current_pose.v.x(), current_pose.v.y(), current_pose.wz);
+        path_planning.set_velocity(current_vel, Eigen::Vector3d::Zero());
+
+        auto trajectory = path_planning.path_planning(start, goal, 5000);
+
+        if (!trajectory.has_value()) {
+            logger::fsm_replan->warn("planning failed");
+            need_replan_ = true;
+            return tl::make_unexpected(PathError::PLANNING_FAILED);
+        }
+
+        // MINCO 五阶轨迹优化(时间 + 平滑 + ESDF 避障 + 速度/加速度软约束)。
+        // 优化失败或安全检查不过时保持 path_planning 原始轨迹,安全兜底。
+        result_.planning_traj = trajectory.value();
+        // [临时诊断] 打印 raw_path / optimized_path 点数,确认直线/近距离时的短路情况
+        logger::fsm_replan->info(
+            "path points: raw={} optimized={} total_time={:.2f}s",
+            result_.planning_traj.raw_path.size(),
+            result_.planning_traj.optimized_path.size(),
+            result_.planning_traj.total_time
+        );
+        minco_opt::GridMapESDF grid_map_esdf(grid_map);
+        ma_opt_.set_esdf_interface(&grid_map_esdf);
+        auto ma_intput = ma_spline_opt::from_path_planning_trajectory(trajectory.value());
+        auto ma_output = ma_opt_.optimize(ma_intput);
+        result_.ma_spline_traj = ma_output;
+
+        result_.path_state = PathState::SUCCESSED;
+        old_goal_pose_ = goal_pose;
+        need_replan_ = false;
+        return result_;
+    }
+    return result_;
+}
+auto FsmReplan::one_plan(
+    const utils::RobotState& goal_pose,
+    const utils::RobotState& current_pose,
+    std::shared_ptr<grid_map::GridMap> grid_map
+) -> path {
+    utils::TimeConsuming timer("planner_fsm", true); // true 表示允许打印
+    path_planning.set_map(*grid_map);
+    Eigen::Vector2d start(current_pose.p.x(), current_pose.p.y());
+    Eigen::Vector2d goal(goal_pose.p.x(), goal_pose.p.y());
+
+    path_planning.set_use_jps(true);
+
+    const Eigen::Vector3d& current_vel = Eigen::Vector3d(current_pose.v.x(), current_pose.v.y(), current_pose.wz);
+    path_planning.set_velocity(current_vel, Eigen::Vector3d::Zero());
+
+    auto trajectory = path_planning.path_planning(start, goal, 5000);
+    if (!trajectory.has_value()) {
+        logger::fsm_replan->warn("planning failed");
+        return tl::make_unexpected(PathError::PLANNING_FAILED);
+    }
+    logger::fsm_replan->info(
+        "path points: raw={} optimized={} total_time={:.2f}s",
+        result_.planning_traj.raw_path.size(),
+        result_.planning_traj.optimized_path.size(),
+        result_.planning_traj.total_time
+    );
+    const auto& timed = result_.planning_traj.timed_trajectory;
+    logger::fsm_replan->info(
+        "timed_trajectory: size={}, first_t={:.3f}, last_t={:.3f}, total_time={:.3f}",
+        timed.size(),
+        timed.empty() ? -1.0 : timed.front().time,
+        timed.empty() ? -1.0 : timed.back().time,
+        result_.planning_traj.total_time
+    );
+    result_.planning_traj = trajectory.value();
+    utils::TimeConsuming opt_timer("ma_opt", true);
+    minco_opt::GridMapESDF grid_map_esdf(grid_map);
+    ma_opt_.set_esdf_interface(&grid_map_esdf);
+    auto ma_intput = ma_spline_opt::from_path_planning_trajectory(trajectory.value());
+    auto ma_output = ma_opt_.optimize(ma_intput);
+    result_.ma_spline_traj = ma_output;
+    return result_;
+}
 auto FsmReplan::minco_plan(
     const utils::RobotState& goal_pose,
     const utils::RobotState& current_pose,

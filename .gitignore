@@ -3,4 +3,4 @@ install
 log
 .vscode
 .cache
-./3rd
+3rd

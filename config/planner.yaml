@@ -4,6 +4,9 @@ ros2:
   target_topic_name: "/goal_pose"             # 目标点话题，rviz 下发目标
   clickedPoint_topic_name: "/clicked_point"   # rviz 点选话题，用于画区域等
   odom_topic_name: "/lio/base_odom"           # 里程计话题，提供位置/速度/姿态
+  cmd_vel_name: "/cmd_vel_chassis"
+  save_global_map_path:  "/home/xyt/map/src/MA_Nav/map"
+  save_map_srv_topic: "/save_global_map"
   map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"   # 地图参数
   global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm" # 全局栅格地图
   is_minco: false
@@ -15,7 +18,7 @@ map:
 planner_config:
     # ---------- 上游路径规划 / 梯形速度规划参数 ----------
   path_planning_params:
-    safe_threshold: 0.3        # JPS/A* 与后处理的安全距离阈值 (m)
+    safe_threshold: 0.32       # JPS/A* 与后处理的安全距离阈值 (m)
     max_vel: 3.0               # 梯形速度规划最大速度 (m/s)
     max_acc: 5.0               # 梯形速度规划最大加速度 (m/s²)
     time_resolution: 0.4       # 均匀时间重采样间隔 (s)；
@@ -31,7 +34,7 @@ planner_config:
     # ---------- MA Spline 轨迹优化参数 ----------
   ma_spline_opt_params:
     mode: "OMNI_XY"
-    safe_distance: 0.3
+    safe_distance: 0.32
     v_max: 3.0
     a_max: 5.0
     integral_num_steps: 8
@@ -129,7 +132,7 @@ mpc_param:
   dt: 0.05             # MPC 步长 (s)
 
   # 状态权重 [x, y, yaw, vx, vy, wz]
-  Q: [20.0, 20.0, 0.0, 1.0, 1.0, 0.0]
+  Q: [30.0, 30.0, 0.0, 1.0, 1.0, 0.0]
 
   # 终端状态权重
   QN: [40.0, 40.0, 0.0, 2.0, 2.0, 0.0]

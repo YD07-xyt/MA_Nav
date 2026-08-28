@@ -88,7 +88,17 @@ struct MaSplineInput
     double end_yaw_rate = 0.0;
     double end_yaw_acc = 0.0;
 };
+struct MAsplineOutput
+{
+    std::vector<double> time_segments;
+    double start_time = 0.0;
 
+    SplineTrajectory::QuinticSplineND<2> xy_spline;
+    SplineTrajectory::QuinticSplineND<1> yaw_spline;
+
+    double cost = 0.0;
+    bool success = false;
+};
 inline auto from_path_planning_trajectory(
     const path_planning::PathPostProcessing::Trajectory& traj)
     -> MaSplineInput
@@ -162,16 +172,6 @@ inline auto from_path_planning_trajectory(
     return input;
 }
 
-struct MAsplineOutput
-{
-    std::vector<double> time_segments;
-    double start_time = 0.0;
 
-    SplineTrajectory::QuinticSplineND<2> xy_spline;
-    SplineTrajectory::QuinticSplineND<1> yaw_spline;
-
-    double cost = 0.0;
-    bool success = false;
-};
 
 } // namespace ma_spline_opt

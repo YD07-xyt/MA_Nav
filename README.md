@@ -1,17 +1,14 @@
-    
-
-
-
+# MA_Nav    
 
 ## build
-```bash
+```sh
     sudo apt update
     sudo apt install cpufrequtils
     sudo apt install libompl-dev
 ```
 
 mpc casadi
-```bash
+```sh
     sudo apt-get install swig
     git clone https://github.com/casadi/casadi.git
     cd casadi
@@ -22,11 +19,15 @@ mpc casadi
     sudo make install
 ```
 
-```bash
+```sh
 wget http://fishros.com/install -O fishros && . fishros 
 rosdepc install -r --from-paths src --ignore-src --rosdistro $ROS_DISTRO -y
 ```
 
-```bash
+```sh
 colcon build
+```
+or
+```sh
+colcon build --cmake-args -DHUMBLE_ROS=humble -DCMAKE_BUILD_TYPE=Release  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --symlink-install
 ```

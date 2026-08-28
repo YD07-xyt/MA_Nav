@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
@@ -9,17 +7,17 @@ from launch.substitutions import LaunchConfiguration, TextSubstitution
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    # 获取功能包路径
-    pkg_share = get_package_share_directory('gcopter')
+    # 获取功能包 share 目录
+    pkg_share = get_package_share_directory('ma_nav')
     
-    # 默认参数文件路径（可选，如果不存在可注释）
-    default_params_file = os.path.join(pkg_share, 'config', 'global_planning.yaml')
-    
-    # 声明启动参数：允许外部传入参数文件路径
+    # 默认配置文件路径（使用包内相对路径，更健壮）
+    default_config = os.path.join(pkg_share, 'config', 'planner.yaml')
+
+    # 声明参数，允许外部覆盖
     params_file_arg = DeclareLaunchArgument(
-        'params_file',
-        default_value=default_params_file,
-        description='Path to the YAML parameter file'
+        'planner_params_path',
+        default_value=default_config,
+        description='Path to planner YAML config file'
     )
     
     # 全局规划节点
@@ -29,19 +27,13 @@ def generate_launch_description():
         name='ma_nav_node',
         output='screen',
         emulate_tty=True,
-        
-        #parameters=[LaunchConfiguration('params_file')],
-        # 也可以直接在 launch 中定义参数（不依赖 yaml），但推荐使用 yaml
-        # parameters=[{
-        #     'map_topic': '/map',
-        #     'target_topic': '/target',
-        #     'dilate_radius': 0.2,
-        #     ...
-        # }]
+        parameters=[{
+                'planner_params_path': LaunchConfiguration('planner_params_path')
+        }]
     )
     
-    # 可选：启动 RViz2 可视化（如果配置了相应的 rviz 文件）
-    # rviz_config = os.path.join(pkg_share, 'config', 'gcopter.rviz')
+    # 启动 RViz2 可视化
+    # rviz_config = os.path.join(pkg_share, 'config', 'nav.rviz')
     # rviz_node = Node(
     #     package='rviz2',
     #     executable='rviz2',
@@ -53,5 +45,5 @@ def generate_launch_description():
     return LaunchDescription([
         params_file_arg,
         ma_nav_node,
-        # rviz_node,  # 根据需要取消注释
+        # rviz_node,  
     ])

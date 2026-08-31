@@ -259,9 +259,9 @@ void GlobalPlanner2d::plan_omni() {
 
             visualizer.visualize(result->ma_spline_traj, route);
             // // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
-            if (result->ma_spline_traj.success && result->ma_spline_traj.xy_spline.isInitialized()) {
+            if (result->ma_spline_traj.success && result->ma_spline_traj.trajectory.isInitialized()) {
                 // 保留旧接口也可以，方便可视化/调试
-                trajectory_ppoly_ = result->ma_spline_traj.xy_spline.getTrajectory();
+                trajectory_ppoly_ = result->ma_spline_traj.trajectory.getTrajectory();
 
                 // 新 MPC 使用统一的轨迹接口
                 ma_traj_interface_ = std::make_shared<control::MaSplineTrajectoryInterface>(result->ma_spline_traj);

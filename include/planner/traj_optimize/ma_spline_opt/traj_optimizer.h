@@ -4,6 +4,7 @@
 #include "optimizer_config.h"
 #include "cost.hpp"
 #include "planner/traj_optimize/esdf_Interface.hpp"
+#include "utils/expected.hpp"
 #include "utils/lbfgs.hpp"
 
 #include <algorithm>
@@ -18,7 +19,7 @@ namespace ma_spline_opt {
 class MaSplineTrajectoryOptimizer {
 public:
     using Opt2D = SplineTrajectory::SplineOptimizer<2>;
-    using OptYaw = SplineTrajectory::SplineOptimizer<1>;
+    using Opt3D = SplineTrajectory::SplineOptimizer<3>;
 
     void set_config(const MaSplineOptimizerConfig& config) {
         config_ = config;
@@ -32,10 +33,16 @@ public:
     // 统一入口
     // ========================================================================
     auto optimize(const MaSplineInput& input) -> MAsplineOutput;
-    
+
     bool check_trajectory_collision(const MAsplineOutput& out, const ESDFInterface* esdf, double safe_distance);
 
-    
+private:
+    enum MaOptError{
+        TIMED_TRAJ_NULL,
+        LBFGS_OPT_FAILED,
+        SYNC_WORKING_STATE_FAILED,
+    };
+    using output= tl::expected<MAsplineOutput,MaOptError>;
 
 private:
     SplineTrajectory::QuinticSplineND<2> last_xy_spline_;
@@ -55,38 +62,58 @@ private:
         Spec* spec = nullptr;
     };
 
-    static double cost_callback(void* instance, const Eigen::VectorXd& x, Eigen::VectorXd& g) {
+    static double cost_callback_2d(void* instance, const Eigen::VectorXd& x, Eigen::VectorXd& g) {
         auto* c = static_cast<CallbackCtx*>(instance);
         return c->optimizer->evaluatePrepared(*c->ctx, x, g, *c->spec);
     }
-    auto filter_timed_trajectory(const std::vector<TimedReferencePoint>& input, double min_spacing = 0.3)
-        -> std::vector<TimedReferencePoint>;
+    auto optimize_2d_stage(
+        const SplineTrajectory::SplineOptimizer<2>::ProblemDefinition& problem,
+        const StageOptimizerConfig& stage,
+        Eigen::VectorXd& x,
+        double& final_cost
+    ) -> bool;
     // ========================================================================
     // 2D xy 轨迹优化
     // 直接使用 timed_trajectory，不降采样
     // 点密度由上游 time_resolution 控制
     // ========================================================================
-    auto optimize_xy(const MaSplineInput& input) -> MAsplineOutput;
+    auto optimize_xy(const MaSplineInput& input) -> output;
+
+private:
+    struct CallbackCtx3D {
+        Opt3D* optimizer = nullptr;
+        Opt3D::OptimizationContext* ctx = nullptr;
+
+        using Spec =
+            decltype(Opt3D::makeEvaluateSpec(std::declval<TimeCost&>(), std::declval<RobotIntegralCost<3>&>()));
+
+        Spec* spec = nullptr;
+    };
+    static double cost_callback_3d(void* instance, const Eigen::VectorXd& x, Eigen::VectorXd& g) {
+        auto* c = static_cast<CallbackCtx3D*>(instance);
+        return c->optimizer->evaluatePrepared(*c->ctx, x, g, *c->spec);
+    }
+    auto optimize_3d_stage(
+        const SplineTrajectory::SplineOptimizer<3>::ProblemDefinition& problem,
+        const StageOptimizerConfig& stage,
+        Eigen::VectorXd& x,
+        double& final_cost
+    ) -> bool;
 
     // ========================================================================
     // 联合优化 (x,y,yaw)
-    // 当前先留空
     // ========================================================================
-    MAsplineOutput optimize_xy_yaw_joint(const MaSplineInput& input) {
-        MAsplineOutput out;
-        (void)input;
-        return out;
-    }
+    auto optimize_xy_yaw_joint(const MaSplineInput& input) -> output;
 
 private:
     MaSplineOptimizerConfig config_;
     const ESDFInterface* esdf_ = nullptr;
 
-    Opt2D optimizer_;
-    Opt2D::OptimizationContext ctx_;
+    Opt2D optimizer_2d_;
+    Opt2D::OptimizationContext ctx_2d_;
 
-    OptYaw yaw_optimizer_;
-    OptYaw::OptimizationContext yaw_ctx_;
+    Opt3D optimizer_3d_;
+    Opt3D::OptimizationContext ctx_3d_;
 };
 
 } // namespace ma_spline_opt

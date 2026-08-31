@@ -172,7 +172,7 @@ public:
 
         // ===================== 样条路点 =====================
         wayPointsMarker = routeMarker;
-        wayPointsMarker.points.clear(); // ✅ 关键修复
+        wayPointsMarker.points.clear(); 
         wayPointsMarker.id = -1;
         wayPointsMarker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
         wayPointsMarker.ns = "waypoints";
@@ -241,13 +241,13 @@ public:
         const std::vector<Eigen::Vector3d>& route,
         const std::string& frame_id = "world"
     ) {
-        if (output.success && output.xy_spline.isInitialized()) {
-            visualizeSpline(output.xy_spline, route, frame_id);
+        if (output.success && output.trajectory.isInitialized()) {
+            visualizeSpline(output.trajectory, route, frame_id);
         }
 
-        if (output.yaw_spline.isInitialized()) {
-            visualizeYaw(output.yaw_spline, frame_id);
-        }
+        // if (output.trajectory.isInitialized()) {
+        //     visualizeYaw(output.yaw_spline, frame_id);
+        // }
     }
     // Visualize the trajectory and its front-end path
     template<int D>

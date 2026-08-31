@@ -66,15 +66,16 @@ namespace utils {
                 double t_us = (double) dt * 1e6 / repeat_time_;
                 if (t_us < 1) {
                     t_us *= 1000;
-                    logger::timer->info("[TIMER] {} time consuming \033[32m {} ns\033[0m\n", msg_.c_str(), t_us);
+                    logger::info(logger::timer,"[TIMER] {} time consuming \033[32m {} ns\033[0m\n", msg_.c_str(), t_us);
+
                 } else if (t_us > 1e6) {
                     t_us /= 1e6;
-                    logger::timer->info("[TIMER] {} time consuming \033[32m {} s\033[0m\n", msg_.c_str(), t_us);
+                    logger::info(logger::timer,"[TIMER] {} time consuming \033[32m {} s\033[0m\n", msg_.c_str(), t_us);
                 } else if (t_us > 1e3) {
                     t_us /= 1e3;
-                    logger::timer->info("[TIMER] {} time consuming \033[32m {} ms\033[0m\n", msg_.c_str(), t_us);
+                    logger::info(logger::timer,"[TIMER] {} time consuming \033[32m {} ms\033[0m\n", msg_.c_str(), t_us);
                 } else
-                    logger::timer->info("[TIMER] {} time consuming \033[32m {} us\033[0m\n", msg_.c_str(), t_us);
+                logger::info(logger::timer,"[TIMER] {} time consuming \033[32m {} us\033[0m\n", msg_.c_str(), t_us);
             }
         }
 

@@ -40,13 +40,7 @@ include_directories(
 )
 
 file(GLOB_RECURSE map_sources CONFIGURE_DEPENDS "src/map/*.cpp")
-# file(GLOB_RECURSE planner_sources CONFIGURE_DEPENDS 
-#   "src/planner/*.cpp"  
-#   "src/planner/path_planning/*.cpp" 
-#   "src/planner/replan/*.cpp" 
-#   "src/planner/contoller/*.cpp"
-#   "src/planner/traj_optimize/ma_spline_opt/*.cpp"
-# )
+
 file(GLOB_RECURSE all_cpp CONFIGURE_DEPENDS "*.cpp")
 list(FILTER all_cpp INCLUDE REGEX "^${CMAKE_CURRENT_SOURCE_DIR}/src/planner/")
 set(planner_sources ${all_cpp})

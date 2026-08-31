@@ -104,7 +104,7 @@ private:
   controller::LMpc omni_lmpc_;
   double t_now_;
   Trajectory<5, 2> minco_trajectory_;
-  SplineTrajectory::PPolyND<2, 6> trajectory_ppoly_;
+  SplineTrajectory::PPolyND<3, 6> trajectory_ppoly_;
   std::chrono::steady_clock::time_point start_time_;
 private:
   control::Mpc mpc_;

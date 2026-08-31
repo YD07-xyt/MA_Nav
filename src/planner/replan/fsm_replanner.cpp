@@ -54,7 +54,7 @@ auto FsmReplan::plan(
     }
     // 暂时不考虑加入 路径年龄超过 replan_interval_
     if (need_replan_) {
-        utils::TimeConsuming timer("planner_fsm", false); // true 表示允许打印
+        utils::TimeConsuming timer("planner_fsm", true); // true 表示允许打印
         path_planning.set_map(*grid_map);
 
         Eigen::Vector2d start(current_pose.p.x(), current_pose.p.y());
@@ -81,16 +81,21 @@ auto FsmReplan::plan(
         // 优化失败或安全检查不过时保持 path_planning 原始轨迹,安全兜底。
         result_.planning_traj = trajectory.value();
         // 打印 raw_path / optimized_path 点数,确认直线/近距离时的短路情况
-        logger::info(logger::fsm_replan,
-            "path points: raw={} optimized={} total_time={:.2f}s",
-            result_.planning_traj.raw_path.size(),
-            result_.planning_traj.optimized_path.size(),
-            result_.planning_traj.total_time
-        );
+        // logger::info(logger::fsm_replan,
+        //     "path points: raw={} optimized={} total_time={:.2f}s",
+        //     result_.planning_traj.raw_path.size(),
+        //     result_.planning_traj.optimized_path.size(),
+        //     result_.planning_traj.total_time
+        // );
         minco_opt::GridMapESDF grid_map_esdf(grid_map);
         ma_opt_.set_esdf_interface(&grid_map_esdf);
         auto ma_intput = ma_spline_opt::from_path_planning_trajectory(trajectory.value());
+        ma_intput.model=ma_spline_opt::OptModel::OMNI_XY_YAW_JOINT;
         auto ma_output = ma_opt_.optimize(ma_intput);
+        if(ma_output.success==false){
+            logger::info(logger::fsm_replan,"ma opt failed");
+            return tl::make_unexpected(PathError::MINCO_OPT_FIALED);
+        }
         result_.ma_spline_traj = ma_output;
 
         result_.path_state = PathState::SUCCESSED;

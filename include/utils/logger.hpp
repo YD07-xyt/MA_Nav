@@ -28,7 +28,7 @@ template <typename... Args>
 info(const std::shared_ptr<spdlog::logger>&,
      fmt::format_string<Args...> fmt,
      Args&&... args) -> info<Args...>;
-// info 结构体（接受 logger）
+
 template <typename... Args>
 struct warn {
     constexpr warn(const std::shared_ptr<spdlog::logger>& log,

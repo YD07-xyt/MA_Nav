@@ -3,7 +3,7 @@
 #include "utils/logger.hpp"
 #include "utils/type_utils.hpp"
 namespace replan {
-// 文件内使用的折线碰撞检测辅助函数（不新增类成员，避免只读头文件不同步）
+// 折线碰撞检测辅助函数
 static bool check_path_collision(
     const std::vector<Eigen::Vector2d>& path,
     const grid_map::GridMap& grid_map,
@@ -80,7 +80,7 @@ auto FsmReplan::plan(
         // MINCO 五阶轨迹优化(时间 + 平滑 + ESDF 避障 + 速度/加速度软约束)。
         // 优化失败或安全检查不过时保持 path_planning 原始轨迹,安全兜底。
         result_.planning_traj = trajectory.value();
-        // [临时诊断] 打印 raw_path / optimized_path 点数,确认直线/近距离时的短路情况
+        // 打印 raw_path / optimized_path 点数,确认直线/近距离时的短路情况
         logger::info(logger::fsm_replan,
             "path points: raw={} optimized={} total_time={:.2f}s",
             result_.planning_traj.raw_path.size(),

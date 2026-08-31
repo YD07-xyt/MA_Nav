@@ -75,7 +75,7 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
     );
 
     controller_timer_ = nh->create_wall_timer(
-        std::chrono::milliseconds(33),
+        std::chrono::milliseconds(10),
         [this]() { controller_callback(); },
         control_cb_group_ // 控制器独立组
     );

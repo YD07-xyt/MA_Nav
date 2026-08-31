@@ -154,7 +154,7 @@ auto GridMap::isLineOccupancy(const Eigen::Vector2d& p1, const Eigen::Vector2d& 
     return false;
 }
 
-auto GridMap::getMap() const->RowMatrixXd {
+auto GridMap::getMap() const -> RowMatrixXd {
     RowMatrixXd map(voxel_num_.x(), voxel_num_.y());
     for (int x = 0; x < voxel_num_.x(); ++x) {
         for (int y = 0; y < voxel_num_.y(); ++y) {
@@ -163,108 +163,108 @@ auto GridMap::getMap() const->RowMatrixXd {
     }
     return map;
 }
-    auto GridMap::inflateOccupancy(const RowMatrixXi& occ, double inflate_radius, double resolution)->RowMatrixXi {
-        const int rows = occ.rows();
-        const int cols = occ.cols();
+auto GridMap::inflateOccupancy(const RowMatrixXi& occ, double inflate_radius, double resolution) -> RowMatrixXi {
+    const int rows = occ.rows();
+    const int cols = occ.cols();
 
-        // 膨胀半径对应的格子数
-        int r = static_cast<int>(std::ceil(inflate_radius / resolution));
+    // 膨胀半径对应的格子数
+    int r = static_cast<int>(std::ceil(inflate_radius / resolution));
 
-        // 拷贝一份，避免影响原始 occupancy
-        grid_map::RowMatrixXi inflated = occ;
+    // 拷贝一份，避免影响原始 occupancy
+    grid_map::RowMatrixXi inflated = occ;
 
-        for (int x = 0; x < rows; ++x) {
-            for (int y = 0; y < cols; ++y) {
-                if (occ(x, y) != 1) continue;
+    for (int x = 0; x < rows; ++x) {
+        for (int y = 0; y < cols; ++y) {
+            if (occ(x, y) != 1) continue;
 
-                // 圆形膨胀
-                for (int dx = -r; dx <= r; ++dx) {
-                    for (int dy = -r; dy <= r; ++dy) {
-                        if (dx * dx + dy * dy > r * r) continue;
+            // 圆形膨胀
+            for (int dx = -r; dx <= r; ++dx) {
+                for (int dy = -r; dy <= r; ++dy) {
+                    if (dx * dx + dy * dy > r * r) continue;
 
-                        int nx = x + dx;
-                        int ny = y + dy;
+                    int nx = x + dx;
+                    int ny = y + dy;
 
-                        if (nx < 0 || nx >= rows || ny < 0 || ny >= cols) {
-                            continue;
-                        }
-
-                        inflated(nx, ny) = 1;
+                    if (nx < 0 || nx >= rows || ny < 0 || ny >= cols) {
+                        continue;
                     }
-                }
-            }
-        }
 
-        return inflated;
-    }
-    auto GridMap::updateESDF()->void {
-        int rows = voxel_num_.x();
-        int cols = voxel_num_.y();
-
-        RowMatrixXd tmp_buffer(rows, cols);
-        RowMatrixXd neg_buffer(rows, cols);
-        RowMatrixXi neg_map(rows, cols);
-        RowMatrixXd dist_buffer(rows, cols);
-
-        for (int x = 0; x < rows; ++x) {
-            fillESDF(
-                [&](int y) {
-                    return occ_buffer_[toAddress(Eigen::Vector2i(x, y))] ? 0 : std::numeric_limits<double>::max();
-                },
-                [&](int y, double val) { tmp_buffer(x, y) = val; },
-                0,
-                cols - 1,
-                cols
-            );
-        }
-
-        for (int y = 0; y < cols; ++y) {
-            fillESDF(
-                [&](int x) { return tmp_buffer(x, y); },
-                [&](int x, double val) { dist_buffer(x, y) = resolution_ * std::sqrt(val); },
-                0,
-                rows - 1,
-                rows
-            );
-        }
-
-        for (int x = 0; x < rows; ++x) {
-            for (int y = 0; y < cols; ++y) {
-                neg_map(x, y) = (occ_buffer_[toAddress(Eigen::Vector2i(x, y))] == 0) ? 1 : 0;
-            }
-        }
-
-        for (int x = 0; x < rows; ++x) {
-            fillESDF(
-                [&](int y) { return neg_map(x, y) ? 0 : std::numeric_limits<double>::max(); },
-                [&](int y, double val) { tmp_buffer(x, y) = val; },
-                0,
-                cols - 1,
-                cols
-            );
-        }
-
-        for (int y = 0; y < cols; ++y) {
-            fillESDF(
-                [&](int x) { return tmp_buffer(x, y); },
-                [&](int x, double val) { neg_buffer(x, y) = resolution_ * std::sqrt(val); },
-                0,
-                rows - 1,
-                rows
-            );
-        }
-
-        for (int x = 0; x < voxel_num_.x(); ++x) {
-            for (int y = 0; y < voxel_num_.y(); ++y) {
-                double pos_dist = dist_buffer(x, y);
-                double neg_dist = std::abs(neg_buffer(x, y));
-
-                if (neg_dist > 0.0) {
-                    esdf_buffer_[toAddress(x, y)] = -neg_dist + resolution_;
-                } else {
-                    esdf_buffer_[toAddress(x, y)] = pos_dist;
+                    inflated(nx, ny) = 1;
                 }
             }
         }
     }
+
+    return inflated;
+}
+auto GridMap::updateESDF() -> void {
+    int rows = voxel_num_.x();
+    int cols = voxel_num_.y();
+
+    RowMatrixXd tmp_buffer(rows, cols);
+    RowMatrixXd neg_buffer(rows, cols);
+    RowMatrixXi neg_map(rows, cols);
+    RowMatrixXd dist_buffer(rows, cols);
+
+    for (int x = 0; x < rows; ++x) {
+        fillESDF(
+            [&](int y) {
+                return occ_buffer_[toAddress(Eigen::Vector2i(x, y))] ? 0 : std::numeric_limits<double>::max();
+            },
+            [&](int y, double val) { tmp_buffer(x, y) = val; },
+            0,
+            cols - 1,
+            cols
+        );
+    }
+
+    for (int y = 0; y < cols; ++y) {
+        fillESDF(
+            [&](int x) { return tmp_buffer(x, y); },
+            [&](int x, double val) { dist_buffer(x, y) = resolution_ * std::sqrt(val); },
+            0,
+            rows - 1,
+            rows
+        );
+    }
+
+    for (int x = 0; x < rows; ++x) {
+        for (int y = 0; y < cols; ++y) {
+            neg_map(x, y) = (occ_buffer_[toAddress(Eigen::Vector2i(x, y))] == 0) ? 1 : 0;
+        }
+    }
+
+    for (int x = 0; x < rows; ++x) {
+        fillESDF(
+            [&](int y) { return neg_map(x, y) ? 0 : std::numeric_limits<double>::max(); },
+            [&](int y, double val) { tmp_buffer(x, y) = val; },
+            0,
+            cols - 1,
+            cols
+        );
+    }
+
+    for (int y = 0; y < cols; ++y) {
+        fillESDF(
+            [&](int x) { return tmp_buffer(x, y); },
+            [&](int x, double val) { neg_buffer(x, y) = resolution_ * std::sqrt(val); },
+            0,
+            rows - 1,
+            rows
+        );
+    }
+
+    for (int x = 0; x < voxel_num_.x(); ++x) {
+        for (int y = 0; y < voxel_num_.y(); ++y) {
+            double pos_dist = dist_buffer(x, y);
+            double neg_dist = std::abs(neg_buffer(x, y));
+
+            if (neg_dist > 0.0) {
+                esdf_buffer_[toAddress(x, y)] = -neg_dist + resolution_;
+            } else {
+                esdf_buffer_[toAddress(x, y)] = pos_dist;
+            }
+        }
+    }
+}
 }

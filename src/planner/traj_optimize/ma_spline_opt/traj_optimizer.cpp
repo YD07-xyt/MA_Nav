@@ -50,28 +50,33 @@ bool MaSplineTrajectoryOptimizer::check_trajectory_collision(
 }
 
 auto MaSplineTrajectoryOptimizer::optimize(const MaSplineInput& input) -> MAsplineOutput {
-    MAsplineOutput output;
     switch (input.model) {
         case OMNI_XY_YAW_JOINT: {
             auto result = optimize_xy_yaw_joint(input);
+
             if (!result) {
-                MaOptError error = result.error();
-                // 处理错误
-                output.success = false;
+                MAsplineOutput out;
+                out.success = false;
+                return out;
             }
-            output = result.value();
-        };
+
+            return std::move(result.value());
+        }
+
         case OMNI_XY: {
             auto result = optimize_xy(input);
+
             if (!result) {
-                MaOptError error = result.error();
-                // 处理错误
-                output.success = false;
+                MAsplineOutput out;
+                out.success = false;
+                return out;
             }
-            output = result.value();
-        };
+
+            return std::move(result.value());
+        }
     }
-    return output;
+
+    return MAsplineOutput {};
 }
 
 // ========================================================================

@@ -28,7 +28,12 @@ public:
     auto set_use_jps(bool use_jps) -> void {
         use_jps_ = use_jps;
     }
-    auto path_planning(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, int timeout_ms)
+    auto path_planning(
+        const Eigen::Vector2d& start,
+        const Eigen::Vector2d& goal,
+        double start_yaw,
+        double goal_yaw,
+        int timeout_ms)
         -> std::optional<PathPostProcessing::Trajectory> {
         utils::TimeConsuming timer("Planning", false); // true 表示允许打印
 
@@ -51,7 +56,7 @@ public:
         post_processing_.assign_trajectory_timing(traj);
 
         // 5. Fill additional information
-        post_processing_.fill_additional_trajectory_info(traj, start, goal);
+        post_processing_.fill_additional_trajectory_info(traj, start, goal, start_yaw, goal_yaw);
         if (traj.timed_trajectory.empty() || traj.total_time <= 1e-6) {
             logger::planning->warn("生成的轨迹没有有效时间，已丢弃");
             return std::nullopt;

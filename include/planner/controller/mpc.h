@@ -14,8 +14,8 @@ namespace control {
 // ============================================================
 class TarjectoryInterfaces {
 public:
-    static constexpr int K_STATE_DIM = 6; // x, y, yaw, vx, vy, wz
-    static constexpr int K_INPUT_DIM = 3; // ax, ay, az
+    static constexpr int K_STATE_DIM = 4; // x, y, vx, vy
+    static constexpr int K_INPUT_DIM = 2; // ax, ay
 
     using StateVector = Eigen::Matrix<double, K_STATE_DIM, 1>;
     using InputVector = Eigen::Matrix<double, K_INPUT_DIM, 1>;
@@ -44,8 +44,10 @@ public:
 // ============================================================
 class Mpc {
 public:
-    using StateVector = Eigen::Matrix<double, 6, 1>;
-    using InputVector = Eigen::Matrix<double, 3, 1>;
+    static constexpr int K_STATE_DIM = 4; // x, y, vx, vy
+    static constexpr int K_INPUT_DIM = 2; // ax, ay
+    using StateVector = Eigen::Matrix<double, K_STATE_DIM, 1>;
+    using InputVector = Eigen::Matrix<double, K_INPUT_DIM, 1>;
     using TrajectoryPtr = std::shared_ptr<TarjectoryInterfaces>;
 
     struct Param {
@@ -53,12 +55,12 @@ public:
         double dt = 0.05;
 
         // 状态权重
-        Eigen::Matrix<double, 6, 6> Q = Eigen::Matrix<double, 6, 6>::Zero();
-        Eigen::Matrix<double, 6, 6> QN = Eigen::Matrix<double, 6, 6>::Zero();
+        Eigen::Matrix<double, K_STATE_DIM, K_STATE_DIM> Q = Eigen::Matrix<double, K_STATE_DIM, K_STATE_DIM>::Zero();
+        Eigen::Matrix<double, K_STATE_DIM, K_STATE_DIM> QN = Eigen::Matrix<double, K_STATE_DIM, K_STATE_DIM>::Zero();
 
         // 控制权重
-        Eigen::Matrix<double, 3, 3> R = Eigen::Matrix<double, 3, 3>::Zero();
-        Eigen::Matrix<double, 3, 3> Rd = Eigen::Matrix<double, 3, 3>::Zero();
+        Eigen::Matrix<double, K_INPUT_DIM, K_INPUT_DIM> R = Eigen::Matrix<double, K_INPUT_DIM, K_INPUT_DIM>::Zero();
+        Eigen::Matrix<double, K_INPUT_DIM, K_INPUT_DIM> Rd = Eigen::Matrix<double, K_INPUT_DIM, K_INPUT_DIM>::Zero();
 
         // 状态/控制限幅
         StateVector x_min = StateVector::Constant(-10.0);
@@ -94,8 +96,8 @@ private:
     TrajectoryPtr traj_;
 
     // 离散模型
-    Eigen::Matrix<double, 6, 6> A_;
-    Eigen::Matrix<double, 6, 3> B_;
+    Eigen::Matrix<double, K_STATE_DIM, K_STATE_DIM> A_;
+    Eigen::Matrix<double, K_STATE_DIM, K_INPUT_DIM> B_;
 
     // OSQP
     OsqpEigen::Solver solver_;

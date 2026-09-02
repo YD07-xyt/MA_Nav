@@ -4,12 +4,13 @@ ros2:
   target_topic_name: "/goal_pose"             # 目标点话题，rviz 下发目标
   clickedPoint_topic_name: "/clicked_point"   # rviz 点选话题，用于画区域等
   odom_topic_name: "/lio/base_odom"           # 里程计话题，提供位置/速度/姿态
-  cmd_vel_name: "/cmd_vel_chassis"
+  cmd_vel_name: "/cmd_vel_chassis" #"/cmd_vel" #"/cmd_vel_chassis"
   save_global_map_path:  "/home/xyt/map/src/MA_Nav/map"
   save_map_srv_topic: "/save_global_map"
   map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"   # 地图参数
   global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm" # 全局栅格地图
   is_minco: false
+
 # ==================== 地图模式 ====================
 map:
   mapping_model: false   # true=建图模式，false=规划模式
@@ -18,7 +19,7 @@ map:
 planner_config:
     # ---------- 上游路径规划 / 梯形速度规划参数 ----------
   path_planning_params:
-    safe_threshold: 0.32       # JPS/A* 与后处理的安全距离阈值 (m)
+    safe_threshold: 0.35       # JPS/A* 与后处理的安全距离阈值 (m)
     max_vel: 3.0               # 梯形速度规划最大速度 (m/s)
     max_acc: 5.0               # 梯形速度规划最大加速度 (m/s²)
     time_resolution: 0.4       # 均匀时间重采样间隔 (s)；
@@ -33,11 +34,16 @@ planner_config:
 
     # ---------- MA Spline 轨迹优化参数 ----------
   ma_spline_opt_params:
-    mode: "OMNI_XY"
-    safe_distance: 0.32
+    #mode: "OMNI_XY"
+    safe_distance: 0.35
     v_max: 3.0
     a_max: 5.0
     integral_num_steps: 8
+
+    weight_yaw_vel: 40.0
+    weight_yaw_acc: 40.0
+    yaw_rate_max: 1.5
+    yaw_acc_max: 1.5
 
     # ========== Stage 1：形状优化 ==========
     stage1:
@@ -109,44 +115,29 @@ planner_config:
     projection_search_resolution: 0.02   # 投影点搜索时间分辨率 (s)，越小越精确但计算量越大
 
 
-# ==================== LMPC 控制器参数 ====================
-lmpc_param:
-  N: 20                # MPC 预测步数
-  dt: 0.05             # MPC 控制周期/预测步长 (s)，与 ROS 控制回调周期匹配
-  u_min: [-3.0, -3.0, -1.0]   # 控制量下限 [vx, vy, wz]：
-                               # 线速度 -3.0 m/s，角速度 -1.0 rad/s
-  u_max: [3.0, 3.0, 1.0]      # 控制量上限 [vx, vy, wz]：
-                               # 线速度 3.0 m/s，角速度 1.0 rad/s
-  x_min: [-10.0, -10.0, -3.14] # 状态量下限 [x, y, yaw]
-  x_max: [10.0, 10.0, 3.14]    # 状态量上限 [x, y, yaw]
-  Q: [1.0, 0.0, 0.0,           # 状态权重矩阵 Q（对角）：
-      0.0, 1.0, 0.0,           # x/y 位置权重 1.0，yaw 权重 0.5
-      0.0, 0.0, 0.5]           # 位置权重越大，跟踪越紧；yaw 权重不用太大
-  R: [0.1, 0.0, 0.0,           # 控制权重矩阵 R（对角）：
-      0.0, 0.1, 0.0,           # 线速度控制权重 0.1，角速度控制权重 0.05
-      0.0, 0.0, 0.05]          # R 越小，MPC 控制越激进、速度响应越快
-
-# ==================== 新世界系线性 MPC 参数 ====================
+# ==================== 线性 MPC 参数 ====================
+# 状态: [x, y, vx, vy]
+# 控制: [ax, ay]
 mpc_param:
   N: 20                # 预测步数
   dt: 0.05             # MPC 步长 (s)
 
-  # 状态权重 [x, y, yaw, vx, vy, wz]
-  Q: [30.0, 30.0, 10.0, 1.0, 1.0, 0.0]
+  # 状态权重 [x, y, vx, vy]
+  Q:  [30.0, 30.0, 1.0, 1.0]
 
   # 终端状态权重
-  QN: [40.0, 40.0, 20.0, 2.0, 2.0, 0.0]
+  QN: [40.0, 40.0, 2.0, 2.0]
 
-  # 控制权重 [ax, ay, az]
-  R: [0.05, 0.05, 0.0]
+  # 控制权重 [ax, ay]
+  R:  [0.05, 0.05]
 
-  # 控制增量权重 [dax, day, daz]
-  Rd: [0.05, 0.05, 0.0]
+  # 控制增量权重 [dax, day]
+  Rd: [0.05, 0.05]
 
-  # 状态限幅 [x, y, yaw, vx, vy, wz]
-  x_min: [-10.0, -10.0, -3.14, -3.0, -3.0, -2.0]
-  x_max: [10.0, 10.0, 3.14, 3.0, 3.0, 2.0]
+  # x/y 不设硬约束，给很大值；vx/vy 限制 ±3
+  x_min: [-1000.0, -1000.0, -3.0, -3.0]
+  x_max: [ 1000.0,  1000.0,  3.0,  3.0]
 
-  # 控制限幅 [ax, ay, az]
-  u_min: [-3.0, -3.0, -2.0]
-  u_max: [3.0, 3.0, 2.0]
+  # 控制限幅 [ax, ay]
+  u_min: [-3.0, -3.0]
+  u_max: [ 3.0,  3.0]

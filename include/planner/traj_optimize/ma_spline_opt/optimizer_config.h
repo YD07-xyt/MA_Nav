@@ -38,10 +38,6 @@ struct StageOptimizerConfig {
 };
 
 struct MaSplineOptimizerConfig {
-    enum class Mode { OMNI_XY, OMNI_XY_YAW, OMNI_XY_YAW_JOINT };
-
-    Mode mode = Mode::OMNI_XY;
-
     // 两阶段公共约束
     double safe_distance = 0.3;
     double v_max = 3.0;

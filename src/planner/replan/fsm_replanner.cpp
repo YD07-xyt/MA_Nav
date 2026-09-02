@@ -69,7 +69,7 @@ auto FsmReplan::plan(
         const Eigen::Vector3d& current_vel = Eigen::Vector3d(current_pose.v.x(), current_pose.v.y(), current_pose.wz);
         path_planning.set_velocity(current_vel, Eigen::Vector3d::Zero());
 
-        auto trajectory = path_planning.path_planning(start, goal, 5000);
+        auto trajectory = path_planning.path_planning(start, goal, current_pose.yaw, goal_pose.yaw, 5000);
 
         if (!trajectory.has_value()) {
             logger::warn(logger::fsm_replan,"planning failed");
@@ -90,7 +90,11 @@ auto FsmReplan::plan(
         minco_opt::GridMapESDF grid_map_esdf(grid_map);
         ma_opt_.set_esdf_interface(&grid_map_esdf);
         auto ma_intput = ma_spline_opt::from_path_planning_trajectory(trajectory.value());
-        ma_intput.model=ma_spline_opt::OptModel::OMNI_XY_YAW_JOINT;
+        
+        
+        ma_intput.model=ma_spline_opt::OptModel::OMNI_XY;
+        
+        
         auto ma_output = ma_opt_.optimize(ma_intput);
         if(ma_output.success==false){
             logger::info(logger::fsm_replan,"ma opt failed");
@@ -120,7 +124,7 @@ auto FsmReplan::one_plan(
     const Eigen::Vector3d& current_vel = Eigen::Vector3d(current_pose.v.x(), current_pose.v.y(), current_pose.wz);
     path_planning.set_velocity(current_vel, Eigen::Vector3d::Zero());
 
-    auto trajectory = path_planning.path_planning(start, goal, 5000);
+    auto trajectory = path_planning.path_planning(start, goal, current_pose.yaw, goal_pose.yaw, 5000);
     if (!trajectory.has_value()) {
         logger::warn(logger::fsm_replan,"planning failed");
         return tl::make_unexpected(PathError::PLANNING_FAILED);
@@ -211,7 +215,7 @@ auto FsmReplan::minco_plan(
         const Eigen::Vector3d& current_vel = Eigen::Vector3d(current_pose.v.x(), current_pose.v.y(), current_pose.wz);
         path_planning.set_velocity(current_vel, Eigen::Vector3d::Zero());
 
-        auto trajectory = path_planning.path_planning(start, goal, 5000);
+        auto trajectory = path_planning.path_planning(start, goal, current_pose.yaw, goal_pose.yaw, 5000);
         if (!trajectory.has_value()) {
             logger::warn(logger::fsm_replan,"planning failed");
             need_replan_ = true;

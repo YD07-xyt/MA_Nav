@@ -102,8 +102,13 @@ public:
     auto normalize_angle(double ref_angle, double& angle) const -> void;
     auto assign_trajectory_timing(Trajectory& traj) -> void;
 
-    auto fill_additional_trajectory_info(Trajectory& traj, const Eigen::Vector2d& start, const Eigen::Vector2d& goal)
-        -> void;
+    auto fill_additional_trajectory_info(
+        Trajectory& traj,
+        const Eigen::Vector2d& start,
+        const Eigen::Vector2d& goal,
+        double start_yaw,
+        double goal_yaw
+    ) -> void;
     auto evaluate_duration(double length, double start_vel, double end_vel, double max_vel, double max_acc) const
         -> double;
 

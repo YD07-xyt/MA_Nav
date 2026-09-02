@@ -27,15 +27,15 @@ public:
 
         const double local_time = std::clamp(t, 0.0, duration());
         const double spline_time = output_.trajectory.getStartTime() + local_time;
-        const auto& traj = output_.trajectory.getTrajectory();
 
+        const auto& traj = output_.trajectory.getTrajectory();
         const Eigen::Vector3d p = traj.evaluate(spline_time, 0);
         const Eigen::Vector3d v = traj.evaluate(spline_time, 1);
         const Eigen::Vector3d a = traj.evaluate(spline_time, 2);
 
         ref.time = local_time;
-        ref.state << p.x(), p.y(), p.z(), v.x(), v.y(), v.z();
-        ref.input << a.x(), a.y(), a.z();
+        ref.state << p.x(), p.y(), v.x(), v.y();
+        ref.input << a.x(), a.y();
         return true;
     }
 
@@ -57,10 +57,7 @@ public:
         return best_t;
     }
 
-    double update_track_time(
-        const Eigen::Vector2d& pos,
-        double hint) const override {
-
+    double update_track_time(const Eigen::Vector2d& pos, double hint) const override {
         if (!valid()) return 0.0;
 
         const double dur = duration();
@@ -81,11 +78,7 @@ public:
         return best_t;
     }
 
-    bool sample_sequence(
-        double t_start,
-        double dt,
-        int N,
-        std::vector<ReferencePoint>& refs) const override {
+    bool sample_sequence(double t_start, double dt, int N, std::vector<ReferencePoint>& refs) const override {
         if (!valid() || dt < 0.0 || N < 0) return false;
 
         refs.clear();

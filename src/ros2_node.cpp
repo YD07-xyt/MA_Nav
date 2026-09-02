@@ -28,8 +28,7 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
     visualizer(nh_),
     //fsm_(config.fsm_config),
     ma_map_(std::make_shared<ma_map::MaMap>(config.map_params_path)),
-    mpc_(config.mpc_params),
-    omni_lmpc_(config.lmpc_param) {
+    mpc_(config.mpc_params) {
     start_time_ = std::chrono::steady_clock::now();
     fsm_replanner.set_param(config.planner_config);
 
@@ -101,8 +100,9 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
         config.save_map_srv_topic,
         [this](const std_srvs::srv::Trigger::Request::SharedPtr, std_srvs::srv::Trigger::Response::SharedPtr res) {
             save_global_map(config.save_global_map_path);
+            std::string msg = "Global map saved to " + config.save_global_map_path;
             res->success = true;
-            res->message = "Global map saved to /home/xyt/map/src/gcopter/map";
+            res->message = msg;
         }
     );
     ma_map_->set_mapping_model(config.mapping_model);
@@ -118,24 +118,58 @@ void GlobalPlanner2d::controller_callback() {
         return;
     }
 
-    // 当前状态
-    Eigen::Matrix<double, 6, 1> x0;
-    x0 << current_XYTheta->x(), current_XYTheta->y(),
-        current_XYTheta->z(), // yaw
-        current_pose->v.x(), current_pose->v.y(), current_pose->wz;
-
     // 用当前位置更新游标
     Eigen::Vector2d pos(current_XYTheta->x(), current_XYTheta->y());
     t_track_ = ma_traj_interface_->update_track_time(pos, t_track_);
 
     double t_now = t_track_;
 
-    Eigen::Matrix<double, 3, 1> u_cmd;
-    std::vector<Eigen::Matrix<double, 6, 1>> predicted_states;
-    std::vector<Eigen::Matrix<double, 3, 1>> predicted_inputs;
+    // yaw 只用于速度坐标变换
+    const double yaw = current_XYTheta->z();
+    const double c = std::cos(yaw);
+    const double s = std::sin(yaw);
+
+    // 当前 MPC 状态速度：优先用上一帧 MPC 指令，避免里程计噪声/超速导致 infeasible
+    double vx_world_state = 0.0;
+    double vy_world_state = 0.0;
+
+    if (has_last_mpc_cmd_) {
+        // 使用上一帧 MPC 的 world 速度指令
+        vx_world_state = last_vx_world_cmd_;
+        vy_world_state = last_vy_world_cmd_;
+    } else {
+        // 第一帧：用里程计速度，但限幅到合理范围，避免一开始就 infeasible
+        const double vx_body = current_pose->v.x();
+        const double vy_body = current_pose->v.y();
+
+        double vx_world_odom = c * vx_body - s * vy_body;
+        double vy_world_odom = s * vx_body + c * vy_body;
+
+        // 限幅到 MPC 速度约束内
+        constexpr double kMaxVel = 3.0;
+        vx_world_state = std::clamp(vx_world_odom, -kMaxVel, kMaxVel);
+        vy_world_state = std::clamp(vy_world_odom, -kMaxVel, kMaxVel);
+    }
+
+    // 4 状态 MPC: [x, y, vx, vy]
+    control::Mpc::StateVector x0;
+    x0 << current_XYTheta->x(), current_XYTheta->y(), vx_world_state, vy_world_state;
+
+    control::Mpc::InputVector u_cmd;
+    std::vector<control::Mpc::StateVector> predicted_states;
+    std::vector<control::Mpc::InputVector> predicted_inputs;
 
     if (!mpc_.solve(x0, t_now, u_cmd, predicted_states, predicted_inputs)) {
+        // 调试时打印 x0，确认是不是速度导致 infeasible
+        logger::warn(logger::ros2, "MPC solve failed, x0=[{:.3f}, {:.3f}, {:.3f}, {:.3f}]", x0(0), x0(1), x0(2), x0(3));
         return;
+    }
+
+    // 求解成功，更新上一帧 MPC 指令
+    if (predicted_states.size() >= 2) {
+        last_vx_world_cmd_ = predicted_states[1](2);
+        last_vy_world_cmd_ = predicted_states[1](3);
+        has_last_mpc_cmd_ = true;
     }
 
     // 用预测的下一时刻状态作为速度指令
@@ -143,105 +177,43 @@ void GlobalPlanner2d::controller_callback() {
         return;
     }
 
-    double vx_world = predicted_states[1](3);
-    double vy_world = predicted_states[1](4);
-    double wz = predicted_states[1](5);
+    // 4 状态索引: 0=x, 1=y, 2=vx, 3=vy
+    const double vx_world_cmd = predicted_states[1](2);
+    const double vy_world_cmd = predicted_states[1](3);
 
-    double yaw = x0(2);
-    double c = std::cos(yaw);
-    double s = std::sin(yaw);
-
+    // world -> body 输出
     geometry_msgs::msg::Twist twist;
-    twist.linear.x = c * vx_world + s * vy_world;
-    twist.linear.y = -s * vx_world + c * vy_world;
-    twist.angular.z = wz;
+    twist.linear.x = c * vx_world_cmd + s * vy_world_cmd;
+    twist.linear.y = -s * vx_world_cmd + c * vy_world_cmd;
+    twist.angular.z = 0.0; // 不控制 yaw
+
+    // 异常保护
+    if (twist.linear.x > 20 || twist.linear.y > 20 || twist.angular.z > 20) {
+        logger::warn(logger::ros2, "x:{},y:{},w:{}", twist.linear.x, twist.linear.y, twist.angular.z);
+        return;
+    }
+    if (twist.linear.x < -20 || twist.linear.y < -20 || twist.angular.z < -20) {
+        logger::warn(logger::ros2, "x:{},y:{},w:{}", twist.linear.x, twist.linear.y, twist.angular.z);
+        return;
+    }
+    if (std::isnan(twist.linear.x) || std::isnan(twist.linear.y) || std::isnan(twist.angular.z)) {
+        logger::warn(logger::ros2, "x:{},y:{},w:{}", twist.linear.x, twist.linear.y, twist.angular.z);
+        return;
+    }
 
     cmd_vel_pub_->publish(twist);
 }
-// void GlobalPlanner2d::controller_callback() {
-//     if (!current_XYTheta.has_value()) {
-//         // spdlog::warn("[controller_callback] no current_XYtheta");
-//         return;
-//     }
-//     // if (!trajectory_.isInitialized()) {
-//     //     // spdlog::warn("轨迹未初始化，等待规划...");
-//     //     return;
-//     // }
-//     if (config.is_minco == true) {
-//         if (minco_trajectory_.getPieceNum() == 0) {
-//             return;
-//         }
-//     } else {
-//         if (trajectory_ppoly_.getNumSegments() == 0) return;
-//     }
-//     // 距离目标检查（优先）
-//     // 位置阈值 0.08m:比 MPC 停车半径(0.05)略宽,避免 MPC 在 0.06m 处爬行导致
-//     // 到位阶段永不触发;进入后若航向未对齐,原地旋转对齐后再停
-//     if ((current_XYTheta->head<2>() - goal_pose->p.head<2>()).norm() < 0.08) {
-//         // 目标带 yaw 且航向未对齐 -> 纯旋转收尾(MPC 的 Q_theta=0.1 权重低,残差大)
-//         const double yaw_err = std::remainder(goal_pose->yaw - (*current_XYTheta)(2), 2.0 * M_PI);
-//         if (std::abs(yaw_err) > 0.03) {
-//             // 到位旋转:大误差段 P 控制 + 最小转速保证(避免纯 P 尾段指数爬行、
-//             // “最后几度磨半天”);小误差段纯 P 平滑收敛(强制最小转速会过冲振荡)
-//             constexpr double kYaw = 4.0; // 角速度增益
-//             constexpr double kWMax = 3.0; // 最大角速度 rad/s(与 lmpc.u_max_w=4.0 同量级)
-//             constexpr double kWMin = 0.6; // 最小角速度 rad/s(误差 >0.08 rad 时生效)
-//             constexpr double kBang = 0.08; // 大误差/小误差切换阈值 rad
-//             double w = kYaw * yaw_err;
-//             if (std::abs(yaw_err) > kBang) {
-//                 const double w_abs = std::max(kWMin, std::min(kWMax, std::abs(w)));
-//                 w = std::copysign(w_abs, yaw_err);
-//             } else {
-//                 w = std::max(-kWMax, std::min(kWMax, w));
-//             }
-//             geometry_msgs::msg::Twist rot;
-//             rot.angular.z = w;
-
-//             cmd_vel_pub_->publish(rot);
-//             return;
-//         }
-
-//         geometry_msgs::msg::Twist stop;
-//         cmd_vel_pub_->publish(stop);
-//         logger::ros2->debug("到达目标点，停止控制");
-//         return;
-//     }
-
-//     // 更新状态并求解（参考游标由 MPC 内部按机器人实际进度跟踪，
-//     //    不再依赖墙钟时间，避免落后参考时反复切角、偏差累积）
-//     std::vector<Eigen::Vector3d> predicted;
-//     if (config.is_minco == true) {
-//         omni_lmpc_.update_current_pose(*current_XYTheta);
-//         predicted = omni_lmpc_.slover(minco_trajectory_);
-//     } else {
-//         omni_lmpc_.update_current_pose(*current_XYTheta);
-//         predicted = omni_lmpc_.slover(trajectory_ppoly_);
-//     }
-//     if (predicted.empty()) {
-//         logger::ros2->warn("MPC 求解失败");
-//         return;
-//     }
-
-//     // 发布控制指令
-//     Eigen::Vector3d u_cmd = omni_lmpc_.u_k;
-//     geometry_msgs::msg::Twist twist;
-//     twist.linear.x = u_cmd.x();
-//     twist.linear.y = u_cmd.y();
-//     twist.angular.z = u_cmd.z();
-//     cmd_vel_pub_->publish(twist);
-// }
 
 void GlobalPlanner2d::planner_callback() {
     GlobalPlanner2d::plan_omni();
 }
 void GlobalPlanner2d::plan_omni() {
     if (this->goal_pose == std::nullopt) {
-
-        logger::debug(logger::ros2,"no goal");
+        logger::debug(logger::ros2, "no goal");
         return;
     }
     if (this->current_pose == std::nullopt) {
-        logger::debug(logger::ros2,"no current_pose");
+        logger::debug(logger::ros2, "no current_pose");
         return;
     }
 
@@ -291,12 +263,7 @@ void GlobalPlanner2d::plan_omni() {
             visualizer.visualize(path_result.minco_opt_traj, route);
             // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
             minco_trajectory_ = path_result.minco_opt_traj;
-
-            if (current_XYTheta.has_value()) {
-                omni_lmpc_.initialize_track(*current_XYTheta, minco_trajectory_);
-            } else {
-                omni_lmpc_.reset_track();
-            }
+            /**TODO: ---->mpc */
         }
     }
 }

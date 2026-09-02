@@ -70,12 +70,14 @@ private:
     ResultPath result_;
 
 public:
+    
     enum PathError {
         PLANNING_FAILED,
         MINCO_OPT_FIALED,
         MAX_RETRIES,
     };
     using path = tl::expected<ResultPath, PathError>;
+    //ma opt
     auto plan(
         const utils::RobotState& goal_pose,
         const utils::RobotState& current_pose,

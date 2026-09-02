@@ -363,11 +363,19 @@ auto PathPostProcessing::assign_trajectory_timing(Trajectory& traj) -> void {
 auto PathPostProcessing::fill_additional_trajectory_info(
     Trajectory& traj,
     const Eigen::Vector2d& start,
-    const Eigen::Vector2d& goal
+    const Eigen::Vector2d& goal,
+    double start_yaw,
+    double goal_yaw
 ) -> void {
     // Set start/goal states
-    traj.start_state_XYTheta << start.x(), start.y(), 0;
-    traj.final_state_XYTheta << goal.x(), goal.y(), traj.path_states.back().theta;
+    traj.start_state_XYTheta << start.x(), start.y(), start_yaw;
+    traj.final_state_XYTheta << goal.x(), goal.y(), goal_yaw;
+
+    // timed_trajectory 通常已经包含首尾点，联合优化会直接使用它们。
+    if (!traj.timed_trajectory.empty()) {
+        traj.timed_trajectory.front().state.z() = start_yaw;
+        traj.timed_trajectory.back().state.z() = goal_yaw;
+    }
 
     // Generate unoccupied positions sequence
     for (const auto& state: traj.path_states) {

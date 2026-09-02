@@ -33,7 +33,7 @@ private:
     // the entire trajectory, the mesh of free-space polytopes,
     // the edge of free-space polytopes, and spheres for safety radius
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr routePub;
-    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr yaw_profile_pub;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr yaw_profile_pub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr wayPointsPub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr trajectoryPub;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr meshPub;
@@ -58,7 +58,7 @@ public:
 public:
     Visualizer(rclcpp::Node::SharedPtr node): node(node) {
         routePub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/route", 10);
-        yaw_profile_pub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/yaw_profile", 10);
+        yaw_profile_pub = node->create_publisher<visualization_msgs::msg::MarkerArray>("/ma_nav/yaw_profile", 10);
         wayPointsPub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/waypoints", 10);
         trajectoryPub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/trajectory", 10);
         meshPub = node->create_publisher<visualization_msgs::msg::Marker>("/ma_nav/mesh", 10);
@@ -83,38 +83,52 @@ public:
         mkr_arr_pub = node->create_publisher<visualization_msgs::msg::MarkerArray>("/ma_nav/map/map_bound", 10);
     }
 
-    inline void
-    visualizeYaw(const SplineTrajectory::QuinticSplineND<1>& yaw_spline, const std::string& frame_id = "world") {
-        if (!yaw_spline.isInitialized() || yaw_spline.getNumSegments() <= 0) return;
+    inline void visualizeYaw(
+        const SplineTrajectory::QuinticSplineND<3>& trajectory,
+        const std::string& frame_id = "world"
+    ) {
+        if (!trajectory.isInitialized() || trajectory.getNumSegments() <= 0) return;
 
-        visualization_msgs::msg::Marker marker;
-        marker.header.stamp = node->now();
-        marker.header.frame_id = frame_id;
-        marker.ns = "yaw_profile";
-        marker.id = 0;
-        marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-        marker.action = visualization_msgs::msg::Marker::ADD;
-        marker.scale.x = 0.05;
-        marker.color.r = 1.0;
-        marker.color.g = 0.8;
-        marker.color.b = 0.0;
-        marker.color.a = 1.0;
+        visualization_msgs::msg::MarkerArray marker_array;
 
-        const double start_time = yaw_spline.getStartTime();
-        const double end_time = yaw_spline.getEndTime();
-        const double dt = 0.05;
+        visualization_msgs::msg::Marker clear_marker;
+        clear_marker.header.stamp = node->now();
+        clear_marker.header.frame_id = frame_id;
+        clear_marker.action = visualization_msgs::msg::Marker::DELETEALL;
+        marker_array.markers.push_back(clear_marker);
 
-        for (double t = start_time; t <= end_time + 1e-6; t += dt) {
-            double yaw = yaw_spline.getTrajectory().evaluate(t, 0)(0);
+        const auto& waypoints = trajectory.getSpacePoints();
+        const auto stamp = node->now();
+        for (Eigen::Index i = 0; i < waypoints.rows(); ++i) {
+            const double x = waypoints(i, 0);
+            const double y = waypoints(i, 1);
+            const double yaw = waypoints(i, 2);
+            if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(yaw)) continue;
 
-            geometry_msgs::msg::Point p;
-            p.x = t;
-            p.y = yaw;
-            p.z = 0.0;
-            marker.points.push_back(p);
+            visualization_msgs::msg::Marker arrow;
+            arrow.header.stamp = stamp;
+            arrow.header.frame_id = frame_id;
+            arrow.ns = "yaw_waypoints";
+            arrow.id = static_cast<int>(i);
+            arrow.type = visualization_msgs::msg::Marker::ARROW;
+            arrow.action = visualization_msgs::msg::Marker::ADD;
+            arrow.pose.position.x = x;
+            arrow.pose.position.y = y;
+            arrow.pose.position.z = 0.08;
+            arrow.pose.orientation.z = std::sin(0.5 * yaw);
+            arrow.pose.orientation.w = std::cos(0.5 * yaw);
+            arrow.scale.x = 0.6;
+            arrow.scale.y = 0.12;
+            arrow.scale.z = 0.12;
+            arrow.color.r = 1.0;
+            arrow.color.g = 0.65;
+            arrow.color.b = 0.0;
+            arrow.color.a = 1.0;
+
+            marker_array.markers.push_back(std::move(arrow));
         }
 
-        yaw_profile_pub->publish(marker);
+        yaw_profile_pub->publish(marker_array);
     }
     // 可视化 SplineTrajectory::QuinticSplineND<D>
     // D=2: (x,y)
@@ -243,11 +257,8 @@ public:
     ) {
         if (output.success && output.trajectory.isInitialized()) {
             visualizeSpline(output.trajectory, route, frame_id);
+            visualizeYaw(output.trajectory, frame_id);
         }
-
-        // if (output.trajectory.isInitialized()) {
-        //     visualizeYaw(output.yaw_spline, frame_id);
-        // }
     }
     // Visualize the trajectory and its front-end path
     template<int D>

@@ -1,6 +1,5 @@
 #pragma once
 #include "planner/controller/mpc.h"
-#include "planner/controller/omni_lmpc.hpp"
 #include "planner/replan/fsm_replanner.h"
 #include "utils/logger.hpp"
 #include <yaml-cpp/yaml.h>
@@ -8,39 +7,169 @@
 #include <cmath>
 #include <string>
 #include <vector>
+
 namespace planner {
 
-//从 YAML 节点加载 Eigen::Vector3d
+// ============================================================
+// 3 维工具
+// ============================================================
+
 inline Eigen::Vector3d load_vector3d(const YAML::Node& node) {
     if (!node.IsDefined() || !node.IsSequence() || node.size() != 3) {
         return Eigen::Vector3d::Zero();
     }
-    return Eigen::Vector3d(node[0].as<double>(), node[1].as<double>(), node[2].as<double>());
+    return Eigen::Vector3d(node[0].as<double>(),
+                           node[1].as<double>(),
+                           node[2].as<double>());
 }
 
-//从 YAML 节点加载 Eigen::Matrix3d（期望 3x3 数组或长度为9的列表）
 inline Eigen::Matrix3d load_matrix3d(const YAML::Node& node) {
-    Eigen::Matrix3d mat = Eigen::Matrix3d::Identity();
+    Eigen::Matrix3d mat = Eigen::Matrix3d::Zero();
     if (!node.IsDefined()) return mat;
+
     if (node.IsSequence() && node.size() == 9) {
-        // 按行优先填充
-        for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j)
-                mat(i, j) = node[i * 3 + j].as<double>();
-    } else if (node.IsSequence() && node.size() == 3) {
-        // 假设是 3x3 矩阵的嵌套数组
+        // 按行优先填充 3x3
         for (int i = 0; i < 3; ++i) {
-            auto row = node[i];
-            if (row.IsSequence() && row.size() == 3) {
-                for (int j = 0; j < 3; ++j)
-                    mat(i, j) = row[j].as<double>();
+            for (int j = 0; j < 3; ++j) {
+                mat(i, j) = node[i * 3 + j].as<double>();
+            }
+        }
+    } else if (node.IsSequence() && node.size() == 3) {
+        bool nested = true;
+        for (int i = 0; i < 3; ++i) {
+            if (!node[i].IsSequence() || node[i].size() != 3) {
+                nested = false;
+                break;
+            }
+        }
+
+        if (nested) {
+            // 3x3 嵌套数组
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 3; ++j) {
+                    mat(i, j) = node[i][j].as<double>();
+                }
+            }
+        } else {
+            // 长度为 3 的列表，按对角矩阵处理
+            for (int i = 0; i < 3; ++i) {
+                mat(i, i) = node[i].as<double>();
             }
         }
     }
+
     return mat;
 }
-//加载 MaSplineOptimizerConfig
-inline void load_stage_config(const YAML::Node& node, ma_spline_opt::StageOptimizerConfig& stage) {
+
+// ============================================================
+// 2 维工具（新 MPC 控制量 ax, ay）
+// ============================================================
+
+inline Eigen::Matrix<double, 2, 1> load_vector2d(const YAML::Node& node) {
+    Eigen::Matrix<double, 2, 1> vec = Eigen::Matrix<double, 2, 1>::Zero();
+    if (!node.IsDefined() || !node.IsSequence() || node.size() != 2) {
+        return vec;
+    }
+    vec(0) = node[0].as<double>();
+    vec(1) = node[1].as<double>();
+    return vec;
+}
+
+inline Eigen::Matrix<double, 2, 2> load_matrix2d(const YAML::Node& node) {
+    Eigen::Matrix<double, 2, 2> mat = Eigen::Matrix<double, 2, 2>::Zero();
+    if (!node.IsDefined()) return mat;
+
+    if (node.IsSequence() && node.size() == 4) {
+        // 按行优先填充 2x2
+        for (int i = 0; i < 2; ++i) {
+            for (int j = 0; j < 2; ++j) {
+                mat(i, j) = node[i * 2 + j].as<double>();
+            }
+        }
+    } else if (node.IsSequence() && node.size() == 2) {
+        bool nested = true;
+        for (int i = 0; i < 2; ++i) {
+            if (!node[i].IsSequence() || node[i].size() != 2) {
+                nested = false;
+                break;
+            }
+        }
+
+        if (nested) {
+            for (int i = 0; i < 2; ++i) {
+                for (int j = 0; j < 2; ++j) {
+                    mat(i, j) = node[i][j].as<double>();
+                }
+            }
+        } else {
+            // 长度为 2 的列表，按对角矩阵处理
+            for (int i = 0; i < 2; ++i) {
+                mat(i, i) = node[i].as<double>();
+            }
+        }
+    }
+
+    return mat;
+}
+
+// ============================================================
+// 4 维工具（新 MPC 状态 x, y, vx, vy）
+// ============================================================
+
+inline Eigen::Matrix<double, 4, 1> load_vector4d(const YAML::Node& node) {
+    Eigen::Matrix<double, 4, 1> vec = Eigen::Matrix<double, 4, 1>::Zero();
+    if (!node.IsDefined() || !node.IsSequence() || node.size() != 4) {
+        return vec;
+    }
+    for (int i = 0; i < 4; ++i) {
+        vec(i) = node[i].as<double>();
+    }
+    return vec;
+}
+
+inline Eigen::Matrix<double, 4, 4> load_matrix4d(const YAML::Node& node) {
+    Eigen::Matrix<double, 4, 4> mat = Eigen::Matrix<double, 4, 4>::Zero();
+    if (!node.IsDefined()) return mat;
+
+    if (node.IsSequence() && node.size() == 16) {
+        // 按行优先填充 4x4
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                mat(i, j) = node[i * 4 + j].as<double>();
+            }
+        }
+    } else if (node.IsSequence() && node.size() == 4) {
+        bool nested = true;
+        for (int i = 0; i < 4; ++i) {
+            if (!node[i].IsSequence() || node[i].size() != 4) {
+                nested = false;
+                break;
+            }
+        }
+
+        if (nested) {
+            for (int i = 0; i < 4; ++i) {
+                for (int j = 0; j < 4; ++j) {
+                    mat(i, j) = node[i][j].as<double>();
+                }
+            }
+        } else {
+            // 长度为 4 的列表，按对角矩阵处理
+            for (int i = 0; i < 4; ++i) {
+                mat(i, i) = node[i].as<double>();
+            }
+        }
+    }
+
+    return mat;
+}
+
+// ============================================================
+// 加载 MaSplineOptimizerConfig
+// ============================================================
+
+inline void load_stage_config(const YAML::Node& node,
+                              ma_spline_opt::StageOptimizerConfig& stage) {
     if (!node) return;
 
     if (node["rho_energy"]) stage.rho_energy = node["rho_energy"].as<double>();
@@ -59,28 +188,30 @@ inline void load_stage_config(const YAML::Node& node, ma_spline_opt::StageOptimi
     if (node["lbfgs_delta"]) stage.lbfgs_delta = node["lbfgs_delta"].as<double>();
 }
 
-inline void load_ma_spline_opt_config(const YAML::Node& node, ma_spline_opt::MaSplineOptimizerConfig& param) {
+inline void load_ma_spline_opt_config(const YAML::Node& node,
+                                      ma_spline_opt::MaSplineOptimizerConfig& param) {
     if (!node) return;
-
-    if (node["mode"]) {
-        std::string mode = node["mode"].as<std::string>();
-        if (mode == "OMNI_XY") param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY;
-        else if (mode == "OMNI_XY_YAW") param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY_YAW;
-        else if (mode == "OMNI_XY_YAW_JOINT")
-            param.mode = ma_spline_opt::MaSplineOptimizerConfig::Mode::OMNI_XY_YAW_JOINT;
-    }
 
     if (node["safe_distance"]) param.safe_distance = node["safe_distance"].as<double>();
     if (node["v_max"]) param.v_max = node["v_max"].as<double>();
     if (node["a_max"]) param.a_max = node["a_max"].as<double>();
     if (node["integral_num_steps"]) param.integral_num_steps = node["integral_num_steps"].as<int>();
 
-    if (node["stage1"]) load_stage_config(node["stage1"], param.stage1);
+    if (node["weight_yaw_vel"]) param.weight_yaw_vel = node["weight_yaw_vel"].as<double>();
+    if (node["weight_yaw_acc"]) param.weight_yaw_acc = node["weight_yaw_acc"].as<double>();
+    if (node["yaw_rate_max"]) param.yaw_rate_max = node["yaw_rate_max"].as<double>();
+    if (node["yaw_acc_max"]) param.yaw_acc_max = node["yaw_acc_max"].as<double>();
 
+    if (node["stage1"]) load_stage_config(node["stage1"], param.stage1);
     if (node["stage2"]) load_stage_config(node["stage2"], param.stage2);
 }
-//加载 MincoOptimizerConfig
-inline void load_minco_opt_config(const YAML::Node& node, minco_opt::MincoOptimizerConfig& param) {
+
+// ============================================================
+// 加载 MincoOptimizerConfig
+// ============================================================
+
+inline void load_minco_opt_config(const YAML::Node& node,
+                                  minco_opt::MincoOptimizerConfig& param) {
     if (!node) return;
     if (node["weight_smooth"]) param.weight_smooth = node["weight_smooth"].as<double>();
     if (node["weight_obstacle"]) param.weight_obstacle = node["weight_obstacle"].as<double>();
@@ -98,27 +229,31 @@ inline void load_minco_opt_config(const YAML::Node& node, minco_opt::MincoOptimi
     if (node["min_time"]) param.min_time = node["min_time"].as<double>();
 }
 
+// ============================================================
 // 加载 ReplanParam
-inline void load_replan_param(const YAML::Node& node, replan::FsmReplan::ReplanParam& param) {
+// ============================================================
+
+inline void load_replan_param(const YAML::Node& node,
+                              replan::FsmReplan::ReplanParam& param) {
     if (!node) return;
     if (node["goal_deviation"]) param.goal_deviation = load_vector3d(node["goal_deviation"]);
-    // if (node["replan_interval"]) param.replan_interval = node["replan_interval"].as<double>();
     if (node["replan_lateral_dev"]) param.replan_lateral_dev = node["replan_lateral_dev"].as<double>();
     if (node["minco_traj_validity_duration"])
         param.minco_traj_validity_duration = node["minco_traj_validity_duration"].as<double>();
     if (node["goal_reached_radius"]) param.goal_reached_radius = node["goal_reached_radius"].as<double>();
-    //if (node["hard_clearance"]) param.hard_clearance = node["hard_clearance"].as<double>();
     if (node["minco_traj_continuity_threshold"])
         param.minco_traj_continuity_threshold = node["minco_traj_continuity_threshold"].as<double>();
     if (node["projection_search_resolution"])
         param.projection_search_resolution = node["projection_search_resolution"].as<double>();
 }
 
+// ============================================================
 // 加载 PathPostProcessingParams
+// ============================================================
+
 inline void load_path_post_processing_params(
     const YAML::Node& node,
-    path_planning::PathPostProcessing::PathPostProcessingParams& param
-) {
+    path_planning::PathPostProcessing::PathPostProcessingParams& param) {
     if (!node) return;
     if (node["max_traj_num"]) param.max_traj_num = node["max_traj_num"].as<int>();
     if (node["dense_sample_resolution"]) param.dense_sample_resolution = node["dense_sample_resolution"].as<double>();
@@ -133,11 +268,14 @@ inline void load_path_post_processing_params(
     if (node["yaw_weight"]) param.yaw_weight = node["yaw_weight"].as<double>();
 }
 
-//加载 PlannerConfig
-inline void load_planner_config(const YAML::Node& node, replan::FsmReplan::PlannerConfig& config) {
+// ============================================================
+// 加载 PlannerConfig
+// ============================================================
+
+inline void load_planner_config(const YAML::Node& node,
+                                replan::FsmReplan::PlannerConfig& config) {
     if (!node) return;
     if (node["replan_params"]) load_replan_param(node["replan_params"], config.replan_params);
-    // 新增：加载 minco 优化器参数
     if (node["minco_opt_params"]) load_minco_opt_config(node["minco_opt_params"], config.minco_opt_params);
     if (node["ma_spline_opt_params"])
         load_ma_spline_opt_config(node["ma_spline_opt_params"], config.ma_spline_opt_params);
@@ -145,73 +283,36 @@ inline void load_planner_config(const YAML::Node& node, replan::FsmReplan::Plann
         load_path_post_processing_params(node["path_planning_params"], config.path_planning_params);
 }
 
-//加载 LMpcParam
-inline void load_lmpc_param(const YAML::Node& node, controller::LMpc::LMpcParam& param) {
-    if (!node) return;
-    if (node["N"]) param.N = node["N"].as<int>();
-    if (node["dt"]) param.dt = node["dt"].as<double>();
-    if (node["u_min"]) param.u_min = load_vector3d(node["u_min"]);
-    if (node["u_max"]) param.u_max = load_vector3d(node["u_max"]);
-    if (node["x_min"]) param.x_min = load_vector3d(node["x_min"]);
-    if (node["x_max"]) param.x_max = load_vector3d(node["x_max"]);
-    if (node["Q"]) param.Q = load_matrix3d(node["Q"]);
-    if (node["R"]) param.R = load_matrix3d(node["R"]);
-}
 
-// 加载 6 维向量
-inline Eigen::Matrix<double, 6, 1> load_vector6d(const YAML::Node& node) {
-    Eigen::Matrix<double, 6, 1> vec = Eigen::Matrix<double, 6, 1>::Zero();
-    if (!node.IsDefined() || !node.IsSequence() || node.size() != 6) {
-        return vec;
-    }
-    for (int i = 0; i < 6; ++i) {
-        vec(i) = node[i].as<double>();
-    }
-    return vec;
-}
+// ============================================================
+// 加载新 4 状态 MPC 参数
+// 状态: [x, y, vx, vy]
+// 控制: [ax, ay]
+// ============================================================
 
-// 辅助函数：加载 6x6 矩阵
-// 支持两种格式：
-//   1. 长度为 36 的列表，按行优先填充
-//   2. 长度为 6 的列表，作为对角矩阵
-inline Eigen::Matrix<double, 6, 6> load_matrix6d(const YAML::Node& node) {
-    Eigen::Matrix<double, 6, 6> mat = Eigen::Matrix<double, 6, 6>::Zero();
-    if (!node.IsDefined()) return mat;
-
-    if (node.IsSequence() && node.size() == 36) {
-        for (int i = 0; i < 6; ++i) {
-            for (int j = 0; j < 6; ++j) {
-                mat(i, j) = node[i * 6 + j].as<double>();
-            }
-        }
-    } else if (node.IsSequence() && node.size() == 6) {
-        for (int i = 0; i < 6; ++i) {
-            mat(i, i) = node[i].as<double>();
-        }
-    }
-
-    return mat;
-}
-
-//加载新 MPC 参数
-inline void load_mpc_param(const YAML::Node& node, control::Mpc::Param& param) {
+inline void load_mpc_param(const YAML::Node& node,
+                           control::Mpc::Param& param) {
     if (!node) return;
 
     if (node["N"]) param.N = node["N"].as<int>();
     if (node["dt"]) param.dt = node["dt"].as<double>();
 
-    if (node["Q"]) param.Q = load_matrix6d(node["Q"]);
-    if (node["QN"]) param.QN = load_matrix6d(node["QN"]);
+    if (node["Q"]) param.Q = load_matrix4d(node["Q"]);
+    if (node["QN"]) param.QN = load_matrix4d(node["QN"]);
 
-    if (node["R"]) param.R = load_matrix3d(node["R"]);
-    if (node["Rd"]) param.Rd = load_matrix3d(node["Rd"]);
+    if (node["R"]) param.R = load_matrix2d(node["R"]);
+    if (node["Rd"]) param.Rd = load_matrix2d(node["Rd"]);
 
-    if (node["x_min"]) param.x_min = load_vector6d(node["x_min"]);
-    if (node["x_max"]) param.x_max = load_vector6d(node["x_max"]);
+    if (node["x_min"]) param.x_min = load_vector4d(node["x_min"]);
+    if (node["x_max"]) param.x_max = load_vector4d(node["x_max"]);
 
-    if (node["u_min"]) param.u_min = load_vector3d(node["u_min"]);
-    if (node["u_max"]) param.u_max = load_vector3d(node["u_max"]);
+    if (node["u_min"]) param.u_min = load_vector2d(node["u_min"]);
+    if (node["u_max"]) param.u_max = load_vector2d(node["u_max"]);
 }
+
+// ============================================================
+// Config
+// ============================================================
 
 struct Config {
     std::string map_topic_name;
@@ -225,42 +326,38 @@ struct Config {
     bool mapping_model; // true: 建图模式，false: 规划模式
     std::string map_params_path;
     std::string global_map_path;
+
     replan::FsmReplan::PlannerConfig planner_config;
-    controller::LMpc::LMpcParam lmpc_param;
     control::Mpc::Param mpc_params;
+
     explicit Config(std::string params_path) {
         YAML::Node config = YAML::LoadFile(params_path);
 
-        // 加载 ROS2 话题和地图参数（已有）
         if (config["ros2"]) {
             map_topic_name = config["ros2"]["map_topic_name"].as<std::string>();
             target_topic_name = config["ros2"]["target_topic_name"].as<std::string>();
             clickedPoint_topic_name = config["ros2"]["clickedPoint_topic_name"].as<std::string>();
             odom_topic_name = config["ros2"]["odom_topic_name"].as<std::string>();
-            cmd_vel_name=config["ros2"]["cmd_vel_name"].as<std::string>();
+            cmd_vel_name = config["ros2"]["cmd_vel_name"].as<std::string>();
             map_params_path = config["ros2"]["map_params_path"].as<std::string>();
             global_map_path = config["ros2"]["global_map_path"].as<std::string>();
-            save_global_map_path=config["ros2"]["save_global_map_path"].as<std::string>();
-            save_map_srv_topic=config["ros2"]["save_map_srv_topic"].as<std::string>();
+            save_global_map_path = config["ros2"]["save_global_map_path"].as<std::string>();
+            save_map_srv_topic = config["ros2"]["save_map_srv_topic"].as<std::string>();
             is_minco = config["ros2"]["is_minco"].as<bool>();
         }
+
         if (config["map"]) {
             mapping_model = config["map"]["mapping_model"].as<bool>();
         }
 
-        // 加载规划器配置
         if (config["planner_config"]) {
             load_planner_config(config["planner_config"], planner_config);
         }
 
-        // 加载 LMPC 参数
-        if (config["lmpc_param"]) {
-            load_lmpc_param(config["lmpc_param"], lmpc_param);
-        }
-        // 加载新世界系线性 MPC 参数
         if (config["mpc_param"]) {
             load_mpc_param(config["mpc_param"], mpc_params);
         }
     }
 };
+
 } // namespace planner

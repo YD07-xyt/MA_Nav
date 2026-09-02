@@ -16,7 +16,7 @@
 
 6. map 语义 隧道   
 
-7. opt+ mpc 考虑yaw,wz  xy ,yaw分开优化 [X] ---> x,y,yaw联合优化
+7. opt+ mpc 考虑yaw,wz  xy ,yaw分开优化 [X] ---> x,y,yaw联合优化 [x] ---> 单独的yaw控制器
 
 8. post_processing 分派时间时考虑隧道前低头-->发布低头指令
 

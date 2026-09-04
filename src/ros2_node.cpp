@@ -29,7 +29,6 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
     //fsm_(config.fsm_config),
     ma_map_(std::make_shared<ma_map::MaMap>(config.map_params_path)),
     mpc_(config.mpc_params) {
-    start_time_ = std::chrono::steady_clock::now();
     fsm_replanner.set_param(config.planner_config);
 
     map_cb_group_ = nh->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -177,6 +176,21 @@ void GlobalPlanner2d::controller_callback() {
         return;
     }
 
+    while (next_fold_event_idx_ < fold_events_.size() && t_track_ >= fold_events_[next_fold_event_idx_].time) {
+        const bool fold = fold_events_[next_fold_event_idx_].fold;
+
+        //publish_fold_cmd(fold);
+        current_fold_state_ = fold;
+
+        if (fold) {
+            logger::info(logger::ros2, "进入隧道，发送折叠指令, t_track={:.3f}", t_track_);
+        } else {
+            logger::info(logger::ros2, "离开隧道，发送抬升指令, t_track={:.3f}", t_track_);
+        }
+
+        ++next_fold_event_idx_;
+    }
+
     // 4 状态索引: 0=x, 1=y, 2=vx, 3=vy
     const double vx_world_cmd = predicted_states[1](2);
     const double vy_world_cmd = predicted_states[1](3);
@@ -231,16 +245,38 @@ void GlobalPlanner2d::plan_omni() {
 
             visualizer.visualize(result->ma_spline_traj, route);
             // // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
-            if (result->ma_spline_traj.success && result->ma_spline_traj.trajectory.isInitialized()) {
-                // 保留旧接口也可以，方便可视化/调试
-                trajectory_ppoly_ = result->ma_spline_traj.trajectory.getTrajectory();
-
-                // 新 MPC 使用统一的轨迹接口
+            if (path_result.is_new_trajectory && result->ma_spline_traj.success
+                && result->ma_spline_traj.trajectory.isInitialized())
+            {
                 ma_traj_interface_ = std::make_shared<control::MaSplineTrajectoryInterface>(result->ma_spline_traj);
 
                 mpc_.set_trajectory(ma_traj_interface_);
 
-                // 初始化游标到离当前位置最近的轨迹点
+                fold_events_ = generate_fold_events(
+                    result->ma_spline_traj,
+                    *ma_map_->get_grid_map(),
+                    kFoldTime,
+                    kUnfoldTime,
+                    kMarginTime
+                );
+
+                next_fold_event_idx_ = 0;
+
+                // 跳过新轨迹上已经过去的折叠事件
+                // 并确定当前时刻“应该处于什么状态”
+                bool desired_fold_state = current_fold_state_;
+
+                while (next_fold_event_idx_ < fold_events_.size() && fold_events_[next_fold_event_idx_].time <= t_track_
+                ) {
+                    desired_fold_state = fold_events_[next_fold_event_idx_].fold;
+                    ++next_fold_event_idx_;
+                }
+
+                // 如果新轨迹当前时刻应该的状态和实际下发状态不一致，立即补发一次
+                if (desired_fold_state != current_fold_state_) {
+                    //publish_fold_cmd(desired_fold_state);
+                    current_fold_state_ = desired_fold_state;
+                }
                 if (current_XYTheta.has_value()) {
                     Eigen::Vector2d pos(current_XYTheta->x(), current_XYTheta->y());
                     t_track_ = ma_traj_interface_->nearest_time(pos);
@@ -538,5 +574,93 @@ void GlobalPlanner2d::save_global_map(const std::string& map_dir) {
     y.close();
 
     logger::info(logger::ros2, "Saved global map {}x{} -> {}", w, h, map_dir);
+}
+std::vector<GlobalPlanner2d::TunnelInterval> GlobalPlanner2d::detect_tunnel_intervals(
+    const ma_spline_opt::MAsplineOutput& ma_traj,
+    const grid_map::GridMap& map,
+    double sample_dt
+) {
+    std::vector<TunnelInterval> intervals;
+
+    if (!ma_traj.success || !ma_traj.trajectory.isInitialized()) {
+        return intervals;
+    }
+
+    const double duration = ma_traj.trajectory.getDuration();
+    const double start_time = ma_traj.trajectory.getStartTime();
+    const auto& spline = ma_traj.trajectory.getTrajectory();
+
+    bool inside = false;
+    double entry_time = 0.0;
+
+    for (double local_t = 0.0; local_t <= duration + 1e-6; local_t += sample_dt) {
+        const double t = start_time + local_t;
+        const Eigen::Vector2d pos = spline.evaluate(t, 0).head<2>();
+
+        const bool in_tunnel = map.is_tunnel(pos);
+
+        if (!inside && in_tunnel) {
+            inside = true;
+            entry_time = local_t;
+        }
+
+        if (inside && !in_tunnel) {
+            inside = false;
+            intervals.push_back({entry_time, local_t});
+        }
+    }
+
+    if (inside) {
+        intervals.push_back({entry_time, duration});
+    }
+
+    return intervals;
+}
+std::vector<GlobalPlanner2d::FoldEvent> GlobalPlanner2d::generate_fold_events(
+    const ma_spline_opt::MAsplineOutput& ma_traj,
+    const grid_map::GridMap& map,
+    double fold_time,
+    double unfold_time,
+    double margin,
+    double sample_dt
+) {
+    std::vector<FoldEvent> events;
+
+    // 1. 先判断是否需要折叠
+    auto intervals = detect_tunnel_intervals(ma_traj, map, sample_dt);
+
+    if (intervals.empty()) {
+        return events;
+    }
+
+    // 2. 生成原始事件
+    std::vector<FoldEvent> raw_events;
+
+    for (const auto& interval: intervals) {
+        double t_fold_start = interval.entry_time - fold_time - margin;
+        double t_unfold_start = interval.exit_time + margin;
+
+        // 如果还没出发就需要折叠，就强制从 0 开始
+        t_fold_start = std::max(0.0, t_fold_start);
+
+        raw_events.push_back({true, t_fold_start});
+        raw_events.push_back({false, t_unfold_start});
+    }
+
+    // 3. 排序，并按状态压缩，避免无意义的连续折叠/展开
+    std::sort(raw_events.begin(), raw_events.end(), [](const FoldEvent& a, const FoldEvent& b) {
+        return a.time < b.time;
+    });
+
+    bool current_folded = false;
+
+    for (const auto& event: raw_events) {
+        if (event.fold != current_folded) {
+            events.push_back(event);
+            current_folded = event.fold;
+        }
+    }
+
+    return events;
 }
 } // namespace planner

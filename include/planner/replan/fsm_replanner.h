@@ -66,11 +66,12 @@ private:
         Trajectory<5, 2> minco_opt_traj;
         ma_spline_opt::MAsplineOutput ma_spline_traj;
         PathState path_state;
+        // true 表示这次返回的是新规划的轨迹
+        bool is_new_trajectory = false;
     };
     ResultPath result_;
 
 public:
-    
     enum PathError {
         PLANNING_FAILED,
         MINCO_OPT_FIALED,
@@ -83,13 +84,14 @@ public:
         const utils::RobotState& current_pose,
         std::shared_ptr<grid_map::GridMap> grid_map
     ) -> path;
-    
+
 public:
     auto one_plan(
         const utils::RobotState& goal_pose,
         const utils::RobotState& current_pose,
         std::shared_ptr<grid_map::GridMap> grid_map
     ) -> path;
+
 public:
     //minco 规划
     auto minco_plan(
@@ -97,6 +99,7 @@ public:
         const utils::RobotState& current_pose,
         std::shared_ptr<grid_map::GridMap> grid_map
     ) -> path;
+
 private:
     path_planning::PathPlanning path_planning;
     ma_spline_opt::MaSplineTrajectoryOptimizer ma_opt_;

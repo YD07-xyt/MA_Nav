@@ -139,13 +139,6 @@ auto PathPostProcessing::assign_trajectory_timing(Trajectory& traj) -> void {
     // ============================================================
     // 1. 高密度采样 + 等效距离（含转弯惩罚）
     // ============================================================
-    struct DenseSample {
-        double linear_dist = 0.0;
-        double equiv_dist = 0.0;
-        double time = 0.0;
-        Eigen::Vector2d pos = Eigen::Vector2d::Zero();
-        double yaw = 0.0;
-    };
 
     std::vector<DenseSample> dense;
 
@@ -218,6 +211,15 @@ auto PathPostProcessing::assign_trajectory_timing(Trajectory& traj) -> void {
     vmax.front() = params_.start_vel;
     vmax.back() = params_.end_vel;
 
+    // ============================================================
+    // 折叠降速
+    // ============================================================
+    std::vector<TunnelInterval> tunnel_intervals = detect_tunnel_intervals(dense);
+
+    apply_fold_speed_limits(vmax, dense, tunnel_intervals);
+    ///==================================================
+    
+    ///==================================================////
     // 前向：受加速能力限制
     for (int i = 1; i < M; ++i) {
         const double ds = dense[i].equiv_dist - dense[i - 1].equiv_dist;
@@ -302,63 +304,6 @@ auto PathPostProcessing::assign_trajectory_timing(Trajectory& traj) -> void {
         traj.timed_trajectory.push_back(point);
     }
 }
-// auto PathPostProcessing::assign_trajectory_timing(Trajectory& traj) -> void {
-//     if (traj.path_states.empty()) return;
-
-//     // Calculate weighted path length (considering angle changes)
-//     traj.total_length = 0;
-//     traj.weighted_length = 0;
-//     for (const auto& state: traj.path_states) {
-//         traj.total_length += state.delta_s;
-//         traj.weighted_length += state.delta_s * params_.distance_weight + fabs(state.delta_theta) * params_.yaw_weight;
-//     }
-
-//     // Calculate total time (trapezoidal velocity profile, uses actual start/end vel)
-//     traj.total_time =
-//         evaluate_duration(traj.weighted_length, params_.start_vel, params_.end_vel, params_.max_vel, params_.max_acc);
-
-//     // Sample time points
-//     int num_segments = std::max(
-//         static_cast<int>(traj.total_time / params_.time_resolution + 0.5),
-//         params_.min_traj_num
-//     );
-//     double sample_time = traj.total_time / num_segments; // Δt
-
-//     // 直接生成均匀的段间时间向量
-//     traj.time_segments = Eigen::VectorXd::Constant(num_segments, sample_time);
-
-//     // Generate timed trajectory points
-//     double accumulated_s = 0;
-//     size_t state_idx = 0;
-
-//     for (double t = sample_time; t < traj.total_time - 1e-3; t += sample_time) {
-//         double s = evaluate_length(
-//             t,
-//             traj.weighted_length,
-//             traj.total_time,
-//             params_.start_vel,
-//             params_.end_vel,
-//             params_.max_vel,
-//             params_.max_acc
-//         );
-
-//         // Find corresponding state
-//         while (state_idx < traj.path_states.size() - 1 && accumulated_s + traj.path_states[state_idx].delta_s < s) {
-//             accumulated_s += traj.path_states[state_idx].delta_s;
-//             state_idx++;
-//         }
-
-//         if (state_idx > 0) {
-//             double ratio = (s - accumulated_s) / traj.path_states[state_idx].delta_s;
-
-//             Eigen::Vector2d pos = traj.path_states[state_idx - 1].position
-//                 + ratio * (traj.path_states[state_idx].position - traj.path_states[state_idx - 1].position);
-//             double theta = traj.path_states[state_idx - 1].theta + ratio * (traj.path_states[state_idx].delta_theta);
-
-//             traj.timed_trajectory.push_back({Eigen::Vector3d(pos.x(), pos.y(), theta), t});
-//         }
-//     }
-// }
 
 auto PathPostProcessing::fill_additional_trajectory_info(
     Trajectory& traj,
@@ -446,5 +391,76 @@ auto PathPostProcessing::evaluate_length(
                 - 0.5 * max_acc * (t - tmp_t) * (t - tmp_t);
         }
     }
+}
+//对每个隧道入口，在入口前一段距离内限速：
+auto PathPostProcessing::apply_fold_speed_limits(
+    std::vector<double>& vmax,
+    const std::vector<DenseSample>& dense,
+    const std::vector<TunnelInterval>& tunnels) const -> void {
+
+    if (tunnels.empty() || dense.empty()) {
+        return;
+    }
+
+    // 入口前需要多长距离保持低速，才能保证有 fold_time 的折叠时间
+    const double prep_dist =
+        params_.fold_prep_speed * params_.fold_time + params_.fold_prep_margin;
+
+    for (const auto& tunnel : tunnels) {
+        if (tunnel.entry_idx <= 0) {
+            // 起点就在隧道里或太靠近入口，无法提前减速
+            continue;
+        }
+
+        const double entry_s = tunnel.entry_s;
+
+        for (int i = 0; i < tunnel.entry_idx; ++i) {
+            // 入口前 prep_dist 范围内限速
+            if (dense[i].equiv_dist > entry_s - prep_dist) {
+                vmax[i] = std::min(vmax[i], params_.fold_prep_speed);
+            }
+        }
+    }
+}
+//用状态机扫描：
+auto PathPostProcessing::detect_tunnel_intervals(
+    const std::vector<DenseSample>& dense) const -> std::vector<TunnelInterval> {
+
+    std::vector<TunnelInterval> intervals;
+
+    if (dense.empty()) {
+        return intervals;
+    }
+
+    bool inside = false;
+    TunnelInterval current;
+
+    for (int i = 0; i < static_cast<int>(dense.size()); ++i) {
+        const bool in_tunnel = map_.is_tunnel(dense[i].pos);
+
+        if (!inside && in_tunnel) {
+            // 进入隧道
+            inside = true;
+            current.entry_idx = i;
+            current.entry_s = dense[i].equiv_dist;
+        }
+
+        if (inside && !in_tunnel) {
+            // 离开隧道
+            inside = false;
+            current.exit_idx = i;
+            current.exit_s = dense[i].equiv_dist;
+            intervals.push_back(current);
+        }
+    }
+
+    // 如果终点仍处于隧道内
+    if (inside) {
+        current.exit_idx = static_cast<int>(dense.size()) - 1;
+        current.exit_s = dense.back().equiv_dist;
+        intervals.push_back(current);
+    }
+
+    return intervals;
 }
 }

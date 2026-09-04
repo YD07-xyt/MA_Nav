@@ -15,6 +15,8 @@ auto FsmReplan::plan(
     const utils::RobotState& current_pose,
     std::shared_ptr<grid_map::GridMap> grid_map
 ) -> path {
+    result_.is_new_trajectory = false;
+
     // 起点≈终点（机器人已到达目标附近）：直接退出，不规划。
     if ((current_pose.p.head<2>() - goal_pose.p.head<2>()).norm() < planner_config_.replan_params.goal_reached_radius) {
         path_state_ = PathState::SUCCESSED;
@@ -101,7 +103,7 @@ auto FsmReplan::plan(
             return tl::make_unexpected(PathError::MINCO_OPT_FIALED);
         }
         result_.ma_spline_traj = ma_output;
-
+        result_.is_new_trajectory = true; 
         result_.path_state = PathState::SUCCESSED;
         old_goal_pose_ = goal_pose;
         need_replan_ = false;

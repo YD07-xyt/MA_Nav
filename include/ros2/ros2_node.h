@@ -96,13 +96,40 @@ private:
     replan::FsmReplan fsm_replanner;
     //FSM fsm_;
     tools::Plotter plotter_;
+    struct FoldEvent {
+        bool fold = true;
+        double time = 0.0;
+    };
+    struct TunnelInterval {
+        double entry_time = 0.0;
+        double exit_time = 0.0;
+    };
+    bool is_print = true;
+    const float kFoldTime = 1.0; //折叠时间
+    const float kUnfoldTime = 1.0; //展开时间
+    const float kMarginTime = 0.5;
+    std::vector<FoldEvent> fold_events_;
+    size_t next_fold_event_idx_ = 0;
+    // 当前下发的云台状态：true=折叠，false=抬升
+    bool current_fold_state_ = false;   
+    std::vector<TunnelInterval> detect_tunnel_intervals(
+        const ma_spline_opt::MAsplineOutput& ma_traj,
+        const grid_map::GridMap& map,
+        double sample_dt = 0.02
+    );
+    std::vector<FoldEvent> generate_fold_events(
+        const ma_spline_opt::MAsplineOutput& ma_traj,
+        const grid_map::GridMap& map,
+        double fold_time,
+        double unfold_time,
+        double margin,
+        double sample_dt = 0.02
+    );
 
 private:
     //contorller
     double t_now_;
     Trajectory<5, 2> minco_trajectory_;
-    SplineTrajectory::PPolyND<3, 6> trajectory_ppoly_;
-    std::chrono::steady_clock::time_point start_time_;
 
 private:
     control::Mpc mpc_;

@@ -18,9 +18,7 @@ inline Eigen::Vector3d load_vector3d(const YAML::Node& node) {
     if (!node.IsDefined() || !node.IsSequence() || node.size() != 3) {
         return Eigen::Vector3d::Zero();
     }
-    return Eigen::Vector3d(node[0].as<double>(),
-                           node[1].as<double>(),
-                           node[2].as<double>());
+    return Eigen::Vector3d(node[0].as<double>(), node[1].as<double>(), node[2].as<double>());
 }
 
 inline Eigen::Matrix3d load_matrix3d(const YAML::Node& node) {
@@ -168,8 +166,7 @@ inline Eigen::Matrix<double, 4, 4> load_matrix4d(const YAML::Node& node) {
 // 加载 MaSplineOptimizerConfig
 // ============================================================
 
-inline void load_stage_config(const YAML::Node& node,
-                              ma_spline_opt::StageOptimizerConfig& stage) {
+inline void load_stage_config(const YAML::Node& node, ma_spline_opt::StageOptimizerConfig& stage) {
     if (!node) return;
 
     if (node["rho_energy"]) stage.rho_energy = node["rho_energy"].as<double>();
@@ -188,8 +185,7 @@ inline void load_stage_config(const YAML::Node& node,
     if (node["lbfgs_delta"]) stage.lbfgs_delta = node["lbfgs_delta"].as<double>();
 }
 
-inline void load_ma_spline_opt_config(const YAML::Node& node,
-                                      ma_spline_opt::MaSplineOptimizerConfig& param) {
+inline void load_ma_spline_opt_config(const YAML::Node& node, ma_spline_opt::MaSplineOptimizerConfig& param) {
     if (!node) return;
 
     if (node["safe_distance"]) param.safe_distance = node["safe_distance"].as<double>();
@@ -210,8 +206,7 @@ inline void load_ma_spline_opt_config(const YAML::Node& node,
 // 加载 MincoOptimizerConfig
 // ============================================================
 
-inline void load_minco_opt_config(const YAML::Node& node,
-                                  minco_opt::MincoOptimizerConfig& param) {
+inline void load_minco_opt_config(const YAML::Node& node, minco_opt::MincoOptimizerConfig& param) {
     if (!node) return;
     if (node["weight_smooth"]) param.weight_smooth = node["weight_smooth"].as<double>();
     if (node["weight_obstacle"]) param.weight_obstacle = node["weight_obstacle"].as<double>();
@@ -233,8 +228,7 @@ inline void load_minco_opt_config(const YAML::Node& node,
 // 加载 ReplanParam
 // ============================================================
 
-inline void load_replan_param(const YAML::Node& node,
-                              replan::FsmReplan::ReplanParam& param) {
+inline void load_replan_param(const YAML::Node& node, replan::FsmReplan::ReplanParam& param) {
     if (!node) return;
     if (node["goal_deviation"]) param.goal_deviation = load_vector3d(node["goal_deviation"]);
     if (node["replan_lateral_dev"]) param.replan_lateral_dev = node["replan_lateral_dev"].as<double>();
@@ -252,7 +246,8 @@ inline void load_replan_param(const YAML::Node& node,
 // ============================================================
 inline void load_path_post_processing_params(
     const YAML::Node& node,
-    path_planning::PathPostProcessing::PathPostProcessingParams& param) {
+    path_planning::PathPostProcessing::PathPostProcessingParams& param
+) {
     if (!node) return;
 
     if (node["max_traj_num"]) param.max_traj_num = node["max_traj_num"].as<int>();
@@ -279,8 +274,7 @@ inline void load_path_post_processing_params(
 // 加载 PlannerConfig
 // ============================================================
 
-inline void load_planner_config(const YAML::Node& node,
-                                replan::FsmReplan::PlannerConfig& config) {
+inline void load_planner_config(const YAML::Node& node, replan::FsmReplan::PlannerConfig& config) {
     if (!node) return;
     if (node["replan_params"]) load_replan_param(node["replan_params"], config.replan_params);
     if (node["minco_opt_params"]) load_minco_opt_config(node["minco_opt_params"], config.minco_opt_params);
@@ -290,15 +284,13 @@ inline void load_planner_config(const YAML::Node& node,
         load_path_post_processing_params(node["path_planning_params"], config.path_planning_params);
 }
 
-
 // ============================================================
 // 加载新 4 状态 MPC 参数
 // 状态: [x, y, vx, vy]
 // 控制: [ax, ay]
 // ============================================================
 
-inline void load_mpc_param(const YAML::Node& node,
-                           control::Mpc::Param& param) {
+inline void load_mpc_param(const YAML::Node& node, control::Mpc::Param& param) {
     if (!node) return;
 
     if (node["N"]) param.N = node["N"].as<int>();
@@ -329,6 +321,11 @@ struct Config {
     std::string cmd_vel_name;
     std::string save_global_map_path;
     std::string save_map_srv_topic;
+
+    // 点击隧道区域
+    std::string tunnel_regions_path;
+    std::string save_tunnel_regions_srv_topic;
+
     bool is_minco;
     bool mapping_model; // true: 建图模式，false: 规划模式
     std::string map_params_path;
@@ -350,6 +347,8 @@ struct Config {
             global_map_path = config["ros2"]["global_map_path"].as<std::string>();
             save_global_map_path = config["ros2"]["save_global_map_path"].as<std::string>();
             save_map_srv_topic = config["ros2"]["save_map_srv_topic"].as<std::string>();
+            tunnel_regions_path = config["ros2"]["tunnel_regions_path"].as<std::string>();
+            save_tunnel_regions_srv_topic = config["ros2"]["save_tunnel_regions_srv_topic"].as<std::string>();
             is_minco = config["ros2"]["is_minco"].as<bool>();
         }
 

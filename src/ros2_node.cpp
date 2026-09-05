@@ -104,9 +104,21 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
             res->message = msg;
         }
     );
+    save_tunnel_regions_srv_ = nh->create_service<std_srvs::srv::Trigger>(
+        config.save_tunnel_regions_srv_topic,
+        [this](const std_srvs::srv::Trigger::Request::SharedPtr, std_srvs::srv::Trigger::Response::SharedPtr res) {
+            save_clicked_regions(config.tunnel_regions_path);
+            res->success = true;
+            res->message = "Tunnel regions saved to " + config.tunnel_regions_path;
+        }
+    );
     ma_map_->set_mapping_model(config.mapping_model);
     if (!config.mapping_model) {
         load_global_map(config.global_map_path);
+    }
+    if (!config.mapping_model) {
+        load_global_map(config.global_map_path);
+        load_clicked_regions(config.tunnel_regions_path);
     }
 }
 void GlobalPlanner2d::controller_callback() {
@@ -419,6 +431,11 @@ void GlobalPlanner2d::target_callback(const geometry_msgs::msg::PoseStamped::Sha
     return;
 }
 
+void GlobalPlanner2d::publish_clicked_regions() {
+    visualization_msgs::msg::MarkerArray regions;
+    regions.markers = clicked_regions_;
+    clicked_region_pub_->publish(regions);
+}
 void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStamped::SharedPtr& msg) {
     clicked_points_.push_back(msg->point);
     logger::info(
@@ -429,23 +446,29 @@ void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStam
         msg->point.z,
         clicked_points_.size()
     );
+
     if (clicked_points_.size() < 4) {
         return;
     }
-    // 构建多边形顶点（Eigen 向量）
-    std::vector<Eigen::Vector2d> polygon;
-    for (const auto& p: clicked_points_) {
-        polygon.emplace_back(p.x, p.y);
-    }
 
-    // 在地图的标记层上标记为“隧道区”
+    // 当前 4 个点作为一个区域
+    std::vector<geometry_msgs::msg::Point> polygon = clicked_points_;
+    std::string region_name = "region_" + std::to_string(clicked_region_polygons_.size());
+
+    // 在地图语义层标记为隧道
     {
         std::unique_lock<std::shared_mutex> lock(map_mutex_);
         auto grid_map = ma_map_->get_grid_map();
-        grid_map->semantics_polygon_region(polygon, grid_map::GridMap::Semantics::TUNNEL);
+
+        std::vector<Eigen::Vector2d> eigen_polygon;
+        for (const auto& p: polygon) {
+            eigen_polygon.emplace_back(p.x, p.y);
+        }
+
+        grid_map->semantics_polygon_region(eigen_polygon, grid_map::GridMap::Semantics::TUNNEL);
     }
 
-    // 每 4 个点连成一个封闭四边形：p0->p1->p2->p3->p0
+    // 生成可视化 marker
     visualization_msgs::msg::Marker region;
     region.header.stamp = nh->now();
     region.header.frame_id = "world";
@@ -454,24 +477,28 @@ void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStam
     region.type = visualization_msgs::msg::Marker::LINE_STRIP;
     region.action = visualization_msgs::msg::Marker::ADD;
     region.pose.orientation.w = 1.0;
-    region.scale.x = 0.05; // 线宽
+    region.scale.x = 0.05;
     region.color.r = 0.0;
     region.color.g = 1.0;
     region.color.b = 0.0;
     region.color.a = 1.0;
-    for (const auto& p: clicked_points_) {
+
+    for (const auto& p: polygon) {
         region.points.push_back(p);
     }
-    region.points.push_back(clicked_points_.front()); // 首点重复以闭合
+    region.points.push_back(polygon.front());
 
+    clicked_region_names_.push_back(region_name);
+    clicked_region_polygons_.push_back(polygon);
     clicked_regions_.push_back(region);
     clicked_points_.clear();
 
-    // 重新发布全部历史区域，已画的区域保持显示
-    visualization_msgs::msg::MarkerArray regions;
-    regions.markers = clicked_regions_;
-    clicked_region_pub_->publish(regions);
-    logger::info(logger::ros2, "Published clicked region #{}", region.id);
+    publish_clicked_regions();
+
+    // 每次画完一个区域后自动保存
+    save_clicked_regions(config.tunnel_regions_path);
+
+    logger::info(logger::ros2, "Published clicked region #{} name={}", region.id, region_name);
 }
 
 void GlobalPlanner2d::load_global_map(const std::string& pgm_path) {
@@ -603,6 +630,130 @@ void GlobalPlanner2d::save_global_map(const std::string& map_dir) {
 
     logger::info(logger::ros2, "Saved global map {}x{} -> {}", w, h, map_dir);
 }
+
+void GlobalPlanner2d::save_clicked_regions(const std::string& yaml_path) {
+    YAML::Emitter out;
+
+    out << YAML::BeginMap;
+    out << YAML::Key << "regions" << YAML::Value << YAML::BeginSeq;
+
+    for (size_t i = 0; i < clicked_region_polygons_.size(); ++i) {
+        out << YAML::BeginMap;
+        out << YAML::Key << "name" << YAML::Value << clicked_region_names_[i];
+        out << YAML::Key << "points" << YAML::Value << YAML::BeginSeq;
+
+        for (const auto& p: clicked_region_polygons_[i]) {
+            out << YAML::Flow << YAML::BeginSeq;
+            out << p.x << p.y << p.z;
+            out << YAML::EndSeq;
+        }
+
+        out << YAML::EndSeq;
+        out << YAML::EndMap;
+    }
+
+    out << YAML::EndSeq;
+    out << YAML::EndMap;
+
+    std::ofstream f(yaml_path);
+    if (!f.is_open()) {
+        logger::error(logger::ros2, "Failed to save tunnel regions: {}", yaml_path);
+        return;
+    }
+
+    f << out.c_str();
+    f.close();
+
+    logger::info(logger::ros2, "Saved {} tunnel regions to {}", clicked_region_polygons_.size(), yaml_path);
+}
+void GlobalPlanner2d::load_clicked_regions(const std::string& yaml_path) {
+    YAML::Node root;
+
+    try {
+        root = YAML::LoadFile(yaml_path);
+    } catch (const std::exception& e) {
+        logger::warn(logger::ros2, "Failed to load tunnel regions {}: {}", yaml_path, e.what());
+        return;
+    }
+
+    if (!root["regions"]) {
+        logger::warn(logger::ros2, "No regions in {}", yaml_path);
+        return;
+    }
+
+    {
+        std::unique_lock<std::shared_mutex> lock(map_mutex_);
+        auto grid_map = ma_map_->get_grid_map();
+
+        clicked_regions_.clear();
+        clicked_region_names_.clear();
+        clicked_region_polygons_.clear();
+
+        int index = 0;
+        for (const auto& region_node: root["regions"]) {
+            std::string name =
+                region_node["name"] ? region_node["name"].as<std::string>() : "region_" + std::to_string(index);
+
+            std::vector<geometry_msgs::msg::Point> polygon;
+
+            if (region_node["points"]) {
+                for (const auto& pt_node: region_node["points"]) {
+                    if (!pt_node.IsSequence() || pt_node.size() < 2) {
+                        continue;
+                    }
+
+                    geometry_msgs::msg::Point p;
+                    p.x = pt_node[0].as<double>();
+                    p.y = pt_node[1].as<double>();
+                    p.z = pt_node.size() > 2 ? pt_node[2].as<double>() : 0.0;
+                    polygon.push_back(p);
+                }
+            }
+
+            if (polygon.size() < 3) {
+                logger::warn(logger::ros2, "Skip invalid region {} with {} points", name, polygon.size());
+                continue;
+            }
+
+            std::vector<Eigen::Vector2d> eigen_polygon;
+            for (const auto& p: polygon) {
+                eigen_polygon.emplace_back(p.x, p.y);
+            }
+
+            grid_map->semantics_polygon_region(eigen_polygon, grid_map::GridMap::Semantics::TUNNEL);
+
+            visualization_msgs::msg::Marker region;
+            region.header.stamp = nh->now();
+            region.header.frame_id = "world";
+            region.ns = "clicked_region";
+            region.id = index;
+            region.type = visualization_msgs::msg::Marker::LINE_STRIP;
+            region.action = visualization_msgs::msg::Marker::ADD;
+            region.pose.orientation.w = 1.0;
+            region.scale.x = 0.05;
+            region.color.r = 0.0;
+            region.color.g = 1.0;
+            region.color.b = 0.0;
+            region.color.a = 1.0;
+
+            for (const auto& p: polygon) {
+                region.points.push_back(p);
+            }
+            region.points.push_back(polygon.front());
+
+            clicked_region_names_.push_back(name);
+            clicked_region_polygons_.push_back(polygon);
+            clicked_regions_.push_back(region);
+
+            ++index;
+        }
+    }
+
+    publish_clicked_regions();
+
+    logger::info(logger::ros2, "Loaded {} tunnel regions from {}", clicked_region_polygons_.size(), yaml_path);
+}
+
 std::vector<GlobalPlanner2d::TunnelInterval> GlobalPlanner2d::detect_tunnel_intervals(
     const ma_spline_opt::MAsplineOutput& ma_traj,
     const grid_map::GridMap& map,

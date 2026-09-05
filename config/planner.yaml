@@ -10,7 +10,9 @@ ros2:
   map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"   # 地图参数
   global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm" # 全局栅格地图
   is_minco: false
-
+    # 点击隧道区域保存/加载
+  tunnel_regions_path: "/home/xyt/map/src/MA_Nav/map/tunnel_regions.yaml"
+  save_tunnel_regions_srv_topic: "/save_tunnel_regions"
 # ==================== 地图模式 ====================
 map:
   mapping_model: false   # true=建图模式，false=规划模式

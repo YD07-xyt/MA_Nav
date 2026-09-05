@@ -72,12 +72,15 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr clicked_region_pub_;
 
-    // rviz2 点选点缓冲：每 4 个点连成一个封闭四边形区域
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_map_srv_;
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_tunnel_regions_srv_;
+
+    // rviz2 点选区域：名字 + 4 个点
     std::vector<geometry_msgs::msg::Point> clicked_points_;
+    std::vector<std::string> clicked_region_names_;
+    std::vector<std::vector<geometry_msgs::msg::Point>> clicked_region_polygons_;
     // 已生成的历史区域（MarkerArray 整体重发，历史区域保持显示）
     std::vector<visualization_msgs::msg::Marker> clicked_regions_;
-
-    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_map_srv_;
 
     rclcpp::TimerBase::SharedPtr planner_timer_;
     rclcpp::TimerBase::SharedPtr controller_timer_;
@@ -111,7 +114,7 @@ private:
     std::vector<FoldEvent> fold_events_;
     size_t next_fold_event_idx_ = 0;
     // 当前下发的云台状态：true=折叠，false=抬升
-    bool current_fold_state_ = false;   
+    bool current_fold_state_ = false;
     std::vector<TunnelInterval> detect_tunnel_intervals(
         const ma_spline_opt::MAsplineOutput& ma_traj,
         const grid_map::GridMap& map,
@@ -152,5 +155,8 @@ public:
     void pub_callback();
     void load_global_map(const std::string& map_path);
     void save_global_map(const std::string& map_dir); // 目录路径，自动生成 .pgm + .yaml
+    void save_clicked_regions(const std::string& yaml_path);
+    void load_clicked_regions(const std::string& yaml_path);
+    void publish_clicked_regions();
 };
 } // namespace planner

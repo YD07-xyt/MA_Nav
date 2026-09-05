@@ -32,6 +32,13 @@ planner_config:
     dense_sample_resolution: 0.1   # 高密度采样间距
     rotation_penalty_weight: 1.0   # 转弯惩罚权重
 
+    # ---------- 云台折叠参数 ----------
+    fold_time: 1.0          # 折叠所需时间 s
+    unfold_time: 1.0        # 展开所需时间 s
+    fold_margin: 0.5        # 折叠/展开安全时间裕量 s
+    fold_prep_speed: 0.05   # 折叠前准备速度 m/s
+    fold_prep_margin: 0.3   # 额外安全距离 m
+
     # ---------- MA Spline 轨迹优化参数 ----------
   ma_spline_opt_params:
     #mode: "OMNI_XY"

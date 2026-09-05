@@ -123,7 +123,7 @@ private:
         double fold_time,
         double unfold_time,
         double margin,
-        double sample_dt = 0.02
+        double sample_dt = 0.002
     );
 
 private:

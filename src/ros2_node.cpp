@@ -243,7 +243,7 @@ void GlobalPlanner2d::plan_omni() {
                 route.emplace_back(point.x(), point.y(), 0.0);
             }
 
-            visualizer.visualize(result->ma_spline_traj, route);
+            //visualizer.visualize(result->ma_spline_traj, route);
             // // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
             if (path_result.is_new_trajectory && result->ma_spline_traj.success
                 && result->ma_spline_traj.trajectory.isInitialized())
@@ -255,9 +255,9 @@ void GlobalPlanner2d::plan_omni() {
                 fold_events_ = generate_fold_events(
                     result->ma_spline_traj,
                     *ma_map_->get_grid_map(),
-                    kFoldTime,
-                    kUnfoldTime,
-                    kMarginTime
+                    config.planner_config.path_planning_params.fold_time,
+                    config.planner_config.path_planning_params.unfold_time,
+                    config.planner_config.path_planning_params.fold_margin
                 );
 
                 next_fold_event_idx_ = 0;
@@ -283,6 +283,34 @@ void GlobalPlanner2d::plan_omni() {
                 } else {
                     t_track_ = 0.0;
                 }
+
+                //可视化
+                std::vector<Eigen::Vector3d> fold_pts, unfold_pts;
+
+                if (result->ma_spline_traj.success && result->ma_spline_traj.trajectory.isInitialized()) {
+                    for (const auto& event: fold_events_) {
+                        const double local_t =
+                            std::clamp(event.time, 0.0, result->ma_spline_traj.trajectory.getDuration());
+
+                        const double t = result->ma_spline_traj.trajectory.getStartTime() + local_t;
+
+                        const Eigen::Vector3d p = result->ma_spline_traj.trajectory.getTrajectory().evaluate(t, 0);
+
+                        if (event.fold) {
+                            fold_pts.push_back(p);
+                        } else {
+                            unfold_pts.push_back(p);
+                        }
+                    }
+                }
+
+                visualizer.visualizeTunnelAndFold(
+                    result->ma_spline_traj,
+                    route,
+                    *ma_map_->get_grid_map(),
+                    fold_pts,
+                    unfold_pts
+                );
             }
         }
     } else {
@@ -613,6 +641,15 @@ std::vector<GlobalPlanner2d::TunnelInterval> GlobalPlanner2d::detect_tunnel_inte
     if (inside) {
         intervals.push_back({entry_time, duration});
     }
+    // for(auto i:intervals){
+    //     logger::info(
+    //         logger::ros2,
+    //         "tunnel interval: entry={:.3f}, exit={:.3f}, duration={:.3f}",
+    //         i.entry_time,
+    //         i.exit_time,
+    //         i.exit_time - i.entry_time
+    //     );
+    // }
 
     return intervals;
 }
@@ -626,17 +663,32 @@ std::vector<GlobalPlanner2d::FoldEvent> GlobalPlanner2d::generate_fold_events(
 ) {
     std::vector<FoldEvent> events;
 
-    // 1. 先判断是否需要折叠
+    // 1. 先检测隧道区间
     auto intervals = detect_tunnel_intervals(ma_traj, map, sample_dt);
 
     if (intervals.empty()) {
         return events;
     }
 
-    // 2. 生成原始事件
+    // 2. 合并过近的隧道区间
+    //    如果两个隧道之间不足以安全完成“抬升 -> 再重新折叠”，
+    //    就视为同一个连续折叠段，避免中间错误抬升。
+    const double merge_gap = fold_time + unfold_time + 2.0 * margin;
+
+    std::vector<TunnelInterval> merged_intervals;
+    for (const auto& interval: intervals) {
+        if (!merged_intervals.empty() && interval.entry_time - merged_intervals.back().exit_time < merge_gap) {
+            // 合并到前一个区间，出口取更晚的那个
+            merged_intervals.back().exit_time = std::max(merged_intervals.back().exit_time, interval.exit_time);
+        } else {
+            merged_intervals.push_back(interval);
+        }
+    }
+
+    // 3. 基于合并后的区间生成原始事件
     std::vector<FoldEvent> raw_events;
 
-    for (const auto& interval: intervals) {
+    for (const auto& interval: merged_intervals) {
         double t_fold_start = interval.entry_time - fold_time - margin;
         double t_unfold_start = interval.exit_time + margin;
 
@@ -647,7 +699,7 @@ std::vector<GlobalPlanner2d::FoldEvent> GlobalPlanner2d::generate_fold_events(
         raw_events.push_back({false, t_unfold_start});
     }
 
-    // 3. 排序，并按状态压缩，避免无意义的连续折叠/展开
+    // 4. 排序，并按状态压缩，避免无意义的连续折叠/展开
     std::sort(raw_events.begin(), raw_events.end(), [](const FoldEvent& a, const FoldEvent& b) {
         return a.time < b.time;
     });

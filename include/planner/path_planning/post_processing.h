@@ -6,7 +6,6 @@
 namespace path_planning {
 
 class PathPostProcessing {
-
 public:
     // 高密度采样点，用于检测隧道/速度分配
     struct DenseSample {
@@ -19,10 +18,10 @@ public:
 
     // 一个隧道区间
     struct TunnelInterval {
-        int entry_idx = -1;      // 入口在 dense 中的 index
-        int exit_idx  = -1;      // 出口在 dense 中的 index
-        double entry_s = 0.0;    // 入口等效里程
-        double exit_s  = 0.0;    // 出口等效里程
+        int entry_idx = -1; // 入口在 dense 中的 index
+        int exit_idx = -1; // 出口在 dense 中的 index
+        double entry_s = 0.0; // 入口等效里程
+        double exit_s = 0.0; // 出口等效里程
     };
 
 private:
@@ -81,9 +80,11 @@ public:
         double rotation_penalty_weight = 1.0;
 
         // 云台折叠相关
-        double fold_time = 1.0;          // 折叠所需时间 s
-        double fold_prep_speed = 0.05;    // 入口前准备速度 m/s
-        double fold_prep_margin = 0.3;   // 额外安全距离 m
+        double fold_time = 1.0; // 折叠所需时间 s
+        double unfold_time = 1.0; // 展开所需时间 s
+        double fold_margin = 0.5; // 折叠/展开安全时间裕量 s
+        double fold_prep_speed = 0.05; // 入口前准备速度 m/s
+        double fold_prep_margin = 0.3; // 额外安全距离 m
     };
 
 private:
@@ -133,13 +134,8 @@ public:
         double goal_yaw
     ) -> void;
 
-    auto evaluate_duration(
-        double length,
-        double start_vel,
-        double end_vel,
-        double max_vel,
-        double max_acc
-    ) const -> double;
+    auto evaluate_duration(double length, double start_vel, double end_vel, double max_vel, double max_acc) const
+        -> double;
 
     auto evaluate_length(
         double t,
@@ -156,14 +152,14 @@ public:
     // ============================================================
 
     // 检测 dense 路径上所有隧道区间
-    auto detect_tunnel_intervals(
-        const std::vector<DenseSample>& dense) const -> std::vector<TunnelInterval>;
+    auto detect_tunnel_intervals(const std::vector<DenseSample>& dense) const -> std::vector<TunnelInterval>;
 
     // 根据隧道区间，在 vmax 上施加入口前降速
     auto apply_fold_speed_limits(
         std::vector<double>& vmax,
         const std::vector<DenseSample>& dense,
-        const std::vector<TunnelInterval>& tunnels) const -> void;
+        const std::vector<TunnelInterval>& tunnels
+    ) const -> void;
 };
 
 } // namespace path_planning

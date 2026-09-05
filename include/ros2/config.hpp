@@ -250,11 +250,11 @@ inline void load_replan_param(const YAML::Node& node,
 // ============================================================
 // 加载 PathPostProcessingParams
 // ============================================================
-
 inline void load_path_post_processing_params(
     const YAML::Node& node,
     path_planning::PathPostProcessing::PathPostProcessingParams& param) {
     if (!node) return;
+
     if (node["max_traj_num"]) param.max_traj_num = node["max_traj_num"].as<int>();
     if (node["dense_sample_resolution"]) param.dense_sample_resolution = node["dense_sample_resolution"].as<double>();
     if (node["rotation_penalty_weight"]) param.rotation_penalty_weight = node["rotation_penalty_weight"].as<double>();
@@ -266,6 +266,13 @@ inline void load_path_post_processing_params(
     if (node["traj_cut_length"]) param.traj_cut_length = node["traj_cut_length"].as<double>();
     if (node["distance_weight"]) param.distance_weight = node["distance_weight"].as<double>();
     if (node["yaw_weight"]) param.yaw_weight = node["yaw_weight"].as<double>();
+
+    // ---------- 云台折叠参数 ----------
+    if (node["fold_time"]) param.fold_time = node["fold_time"].as<double>();
+    if (node["unfold_time"]) param.unfold_time = node["unfold_time"].as<double>();
+    if (node["fold_margin"]) param.fold_margin = node["fold_margin"].as<double>();
+    if (node["fold_prep_speed"]) param.fold_prep_speed = node["fold_prep_speed"].as<double>();
+    if (node["fold_prep_margin"]) param.fold_prep_margin = node["fold_prep_margin"].as<double>();
 }
 
 // ============================================================

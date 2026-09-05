@@ -83,10 +83,8 @@ public:
         mkr_arr_pub = node->create_publisher<visualization_msgs::msg::MarkerArray>("/ma_nav/map/map_bound", 10);
     }
 
-    inline void visualizeYaw(
-        const SplineTrajectory::QuinticSplineND<3>& trajectory,
-        const std::string& frame_id = "world"
-    ) {
+    inline void
+    visualizeYaw(const SplineTrajectory::QuinticSplineND<3>& trajectory, const std::string& frame_id = "world") {
         if (!trajectory.isInitialized() || trajectory.getNumSegments() <= 0) return;
 
         visualization_msgs::msg::MarkerArray marker_array;
@@ -137,10 +135,11 @@ public:
     inline void visualizeSpline(
         const SplineTrajectory::QuinticSplineND<D>& traj,
         const std::vector<Eigen::Vector3d>& route,
-        const std::string& frame_id = "world"
+        const std::string& frame_id = "world",
+        const grid_map::GridMap* tunnel_map = nullptr
     ) {
         visualization_msgs::msg::Marker routeMarker, wayPointsMarker, trajMarker;
-
+        visualization_msgs::msg::Marker tunnelMarker, tunnelDeleteMarker;
         // ===================== 公共基础 =====================
         routeMarker.header.stamp = node->now();
         routeMarker.header.frame_id = frame_id;
@@ -183,10 +182,25 @@ public:
 
             routePub->publish(routeMarker);
         }
+        //
+        if (tunnel_map) {
+            tunnelMarker = routeMarker;
+            tunnelMarker.points.clear();
+            tunnelMarker.id = 0;
+            tunnelMarker.type = visualization_msgs::msg::Marker::LINE_LIST;
+            tunnelMarker.ns = "trajectory_tunnel";
+            tunnelMarker.color.r = 0.0;
+            tunnelMarker.color.g = 1.0;
+            tunnelMarker.color.b = 0.0;
+            tunnelMarker.color.a = 1.0;
+            tunnelMarker.scale.x = 0.3;
 
+            tunnelDeleteMarker = tunnelMarker;
+            tunnelDeleteMarker.action = visualization_msgs::msg::Marker::DELETE;
+        }
         // ===================== 样条路点 =====================
         wayPointsMarker = routeMarker;
-        wayPointsMarker.points.clear(); 
+        wayPointsMarker.points.clear();
         wayPointsMarker.id = -1;
         wayPointsMarker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
         wayPointsMarker.ns = "waypoints";
@@ -233,22 +247,92 @@ public:
             for (double t = start_time + dt; t <= end_time + 1e-6; t += dt) {
                 Eigen::Matrix<double, D, 1> pos = traj.getTrajectory().evaluate(t, 0);
 
+                const Eigen::Vector2d mid(0.5 * (last_pos(0) + pos(0)), 0.5 * (last_pos(1) + pos(1)));
+
+                const bool in_tunnel = tunnel_map && tunnel_map->is_tunnel(mid);
+
+                auto& line_marker = in_tunnel ? tunnelMarker : trajMarker;
+
                 geometry_msgs::msg::Point p;
                 p.x = last_pos(0);
                 p.y = last_pos(1);
                 p.z = 0.0;
-                trajMarker.points.push_back(p);
+                line_marker.points.push_back(p);
 
                 p.x = pos(0);
                 p.y = pos(1);
                 p.z = 0.0;
-                trajMarker.points.push_back(p);
+                line_marker.points.push_back(p);
 
                 last_pos = pos;
             }
 
-            trajectoryPub->publish(trajMarker);
+            if (!trajMarker.points.empty()) {
+                trajectoryPub->publish(trajMarker);
+            }
+
+            if (tunnel_map) {
+                if (!tunnelMarker.points.empty()) {
+                    trajectoryPub->publish(tunnelMarker);
+                } else {
+                    trajectoryPub->publish(tunnelDeleteMarker);
+                }
+            }
         }
+    }
+
+    inline void visualizeFoldMarkers(
+        const std::vector<Eigen::Vector3d>& fold_pts,
+        const std::vector<Eigen::Vector3d>& unfold_pts,
+        const std::string& frame_id = "world"
+    ) {
+        auto publish = [&](const std::string& ns, const std::vector<Eigen::Vector3d>& pts, float r, float g, float b) {
+            visualization_msgs::msg::Marker m;
+            m.header.stamp = node->now();
+            m.header.frame_id = frame_id;
+            m.ns = ns;
+            m.id = 0;
+            m.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+            m.action = pts.empty() ? visualization_msgs::msg::Marker::DELETE : visualization_msgs::msg::Marker::ADD;
+            m.scale.x = 0.5;
+            m.scale.y = 0.5;
+            m.scale.z = 0.5;
+            m.color.r = r;
+            m.color.g = g;
+            m.color.b = b;
+            m.color.a = 1.0;
+
+            for (const auto& p: pts) {
+                geometry_msgs::msg::Point pt;
+                pt.x = p.x();
+                pt.y = p.y();
+                pt.z = p.z();
+                m.points.push_back(pt);
+            }
+
+            wayPointsPub->publish(m);
+        };
+
+        // 折叠点：橙色
+        publish("fold_event", fold_pts, 1.0f, 0.55f, 0.0f);
+
+        // 抬升点：紫色
+        publish("unfold_event", unfold_pts, 0.7f, 0.0f, 1.0f);
+    }
+
+    inline void visualizeTunnelAndFold(
+        const ma_spline_opt::MAsplineOutput& output,
+        const std::vector<Eigen::Vector3d>& route,
+        const grid_map::GridMap& map,
+        const std::vector<Eigen::Vector3d>& fold_pts,
+        const std::vector<Eigen::Vector3d>& unfold_pts,
+        const std::string& frame_id = "world"
+    ) {
+        if (!output.success || !output.trajectory.isInitialized()) return;
+
+        visualizeSpline(output.trajectory, route, frame_id, &map);
+        visualizeYaw(output.trajectory, frame_id);
+        visualizeFoldMarkers(fold_pts, unfold_pts, frame_id);
     }
     inline void visualize(
         const ma_spline_opt::MAsplineOutput& output,

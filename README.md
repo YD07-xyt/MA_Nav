@@ -32,4 +32,6 @@ or
 colcon build --cmake-args -DHUMBLE_ROS=humble -DCMAKE_BUILD_TYPE=Release  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON --symlink-install
 ```
 
+```sh
 ros2 service call /save_tunnel_regions std_srvs/srv/Trigger "{}"
+```

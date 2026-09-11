@@ -52,12 +52,15 @@ public:
         path_planning.set_param(planner_config_.path_planning_params);
     }
 
-private:
+public:
     enum PathState {
         SUCCESSED,
         FAILED,
+        RUNNING,
         IDLE,
-    } path_state_ = PathState::IDLE;
+    } ;
+private:
+   PathState  path_state_ = PathState::IDLE;
     bool need_replan_ = true;
     utils::RobotState old_goal_pose_;
     std::vector<Eigen::Vector2d> last_opt_path_;

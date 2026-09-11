@@ -34,10 +34,13 @@
 #include <rclcpp/time.hpp>
 #include <rclcpp/timer.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_msgs/msg/detail/int16__struct.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <pcl_conversions/pcl_conversions.h>
+#include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/int16.hpp>
 #include "ros2/misc/visualizer.hpp"
 //std
 #include <optional>
@@ -71,7 +74,8 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr clicked_region_pub_;
-
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr fold_pub_; 
+    rclcpp::Publisher<std_msgs::msg::Int16>::SharedPtr nav_feedback_pub_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_map_srv_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr save_tunnel_regions_srv_;
 
@@ -97,6 +101,9 @@ private:
     std::shared_ptr<ma_map::MaMap> ma_map_;
     //重规划
     replan::FsmReplan fsm_replanner;
+    std::optional<std::chrono::steady_clock::time_point> plan_start_time_;
+    replan::FsmReplan::PathState nav_state;
+   auto pub_nav_feedback()->std_msgs::msg::Int16;
     //FSM fsm_;
     tools::Plotter plotter_;
     struct FoldEvent {

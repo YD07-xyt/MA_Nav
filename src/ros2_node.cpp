@@ -2,6 +2,7 @@
 #include <fstream>
 #include "map/grid_map.hpp"
 #include "planner/controller/mpc.h"
+#include "planner/replan/fsm_replanner.h"
 #include "utils/logger.hpp"
 #include "utils/plotter.hpp"
 #include "utils/type_utils.hpp"
@@ -14,6 +15,8 @@
 #include <memory>
 #include <optional>
 #include <spdlog/spdlog.h>
+#include <std_msgs/msg/detail/bool__struct.hpp>
+#include <std_msgs/msg/detail/int16__struct.hpp>
 #include <string>
 #include <tf2/LinearMath/Matrix3x3.hpp>
 #include <tf2/LinearMath/Quaternion.hpp>
@@ -28,7 +31,8 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
     visualizer(nh_),
     //fsm_(config.fsm_config),
     ma_map_(std::make_shared<ma_map::MaMap>(config.map_params_path)),
-    mpc_(config.mpc_params) {
+    mpc_(config.mpc_params),
+    nav_state(replan::FsmReplan::PathState::IDLE) {
     fsm_replanner.set_param(config.planner_config);
 
     map_cb_group_ = nh->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -93,6 +97,8 @@ GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params
     );
     cmd_vel_pub_ = nh->create_publisher<geometry_msgs::msg::Twist>(config.cmd_vel_name, 10);
     clicked_region_pub_ = nh->create_publisher<visualization_msgs::msg::MarkerArray>("/ma_nav/clicked_regions", 10);
+    fold_pub_ = nh->create_publisher<std_msgs::msg::Bool>("/ma_nav/fold", 10);
+    nav_feedback_pub_ = nh->create_publisher<std_msgs::msg::Int16>("/ma_nav/nav_feedback", 10);
 
     // 保存/加载全局地图的 ROS2 服务
     save_map_srv_ = nh->create_service<std_srvs::srv::Trigger>(
@@ -195,8 +201,14 @@ void GlobalPlanner2d::controller_callback() {
         current_fold_state_ = fold;
 
         if (fold) {
+            std_msgs::msg::Bool fold_msg;
+            fold_msg.data = true;
+            fold_pub_->publish(fold_msg);
             logger::info(logger::ros2, "进入隧道，发送折叠指令, t_track={:.3f}", t_track_);
         } else {
+            std_msgs::msg::Bool fold_msg;
+            fold_msg.data = false;
+            fold_pub_->publish(fold_msg);
             logger::info(logger::ros2, "离开隧道，发送抬升指令, t_track={:.3f}", t_track_);
         }
 
@@ -243,88 +255,108 @@ void GlobalPlanner2d::plan_omni() {
         return;
     }
 
+    const auto now = std::chrono::steady_clock::now();
+    if(!plan_start_time_.has_value()){
+        //logger::warn(logger::ros2,"plan_start_time_ is not value");
+        return;
+    }
+    const bool timeout = (now - plan_start_time_.value()) >= std::chrono::seconds(20);
     if (config.is_minco == false) {
         auto result = fsm_replanner.plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
-        if (result) {
-            auto path_result = result.value();
-            visualizer.PubGlobalPath(path_result.planning_traj.raw_path);
-            visualizer.PubOptPath(path_result.planning_traj.optimized_path);
+        if (!result) {
+            if (timeout) {
+                logger::warn(logger::ros2, "plan_omni 20s timeout, no path -> nav:failed");
+                nav_state = replan::FsmReplan::PathState::FAILED;
+                plan_start_time_.reset();
+            }
+            return;
+        }
+        auto path_result = result.value();
 
-            std::vector<Eigen::Vector3d> route;
-            for (auto point: path_result.planning_traj.optimized_path) {
-                route.emplace_back(point.x(), point.y(), 0.0);
+        // ---- 情况 2: PathState 不为 SUCCESSED ----
+        if (path_result.path_state != replan::FsmReplan::PathState::SUCCESSED) {
+            if (timeout) {
+                logger::warn(logger::ros2, "PathState != SUCCESSED after 20s -> nav:failed");
+                nav_state = replan::FsmReplan::PathState::FAILED;
+                plan_start_time_.reset();
+            } else {
+                logger::debug(logger::ros2, "PathState not SUCCESSED, waiting...");
+                nav_state = replan::FsmReplan::PathState::RUNNING;
+            }
+            return;
+        }
+        plan_start_time_.reset();
+        visualizer.PubGlobalPath(path_result.planning_traj.raw_path);
+        visualizer.PubOptPath(path_result.planning_traj.optimized_path);
+
+        std::vector<Eigen::Vector3d> route;
+        for (auto point: path_result.planning_traj.optimized_path) {
+            route.emplace_back(point.x(), point.y(), 0.0);
+        }
+
+        //visualizer.visualize(result->ma_spline_traj, route);
+        // // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
+        if (path_result.is_new_trajectory && result->ma_spline_traj.success
+            && result->ma_spline_traj.trajectory.isInitialized())
+        {
+            ma_traj_interface_ = std::make_shared<control::MaSplineTrajectoryInterface>(result->ma_spline_traj);
+
+            mpc_.set_trajectory(ma_traj_interface_);
+
+            fold_events_ = generate_fold_events(
+                result->ma_spline_traj,
+                *ma_map_->get_grid_map(),
+                config.planner_config.path_planning_params.fold_time,
+                config.planner_config.path_planning_params.unfold_time,
+                config.planner_config.path_planning_params.fold_margin
+            );
+
+            next_fold_event_idx_ = 0;
+
+            // 跳过新轨迹上已经过去的折叠事件
+            // 并确定当前时刻“应该处于什么状态”
+            bool desired_fold_state = current_fold_state_;
+
+            while (next_fold_event_idx_ < fold_events_.size() && fold_events_[next_fold_event_idx_].time <= t_track_) {
+                desired_fold_state = fold_events_[next_fold_event_idx_].fold;
+                ++next_fold_event_idx_;
             }
 
-            //visualizer.visualize(result->ma_spline_traj, route);
-            // // 新轨迹下发:把 MPC 跟踪游标定位到新轨迹上离机器人最近的点
-            if (path_result.is_new_trajectory && result->ma_spline_traj.success
-                && result->ma_spline_traj.trajectory.isInitialized())
-            {
-                ma_traj_interface_ = std::make_shared<control::MaSplineTrajectoryInterface>(result->ma_spline_traj);
+            // 如果新轨迹当前时刻应该的状态和实际下发状态不一致，立即补发一次
+            if (desired_fold_state != current_fold_state_) {
+                //publish_fold_cmd(desired_fold_state);
+                current_fold_state_ = desired_fold_state;
+            }
+            if (current_XYTheta.has_value()) {
+                Eigen::Vector2d pos(current_XYTheta->x(), current_XYTheta->y());
+                t_track_ = ma_traj_interface_->nearest_time(pos);
+            } else {
+                t_track_ = 0.0;
+            }
 
-                mpc_.set_trajectory(ma_traj_interface_);
+            //可视化
+            std::vector<Eigen::Vector3d> fold_pts, unfold_pts;
 
-                fold_events_ = generate_fold_events(
-                    result->ma_spline_traj,
-                    *ma_map_->get_grid_map(),
-                    config.planner_config.path_planning_params.fold_time,
-                    config.planner_config.path_planning_params.unfold_time,
-                    config.planner_config.path_planning_params.fold_margin
-                );
+            if (result->ma_spline_traj.success && result->ma_spline_traj.trajectory.isInitialized()) {
+                for (const auto& event: fold_events_) {
+                    const double local_t = std::clamp(event.time, 0.0, result->ma_spline_traj.trajectory.getDuration());
 
-                next_fold_event_idx_ = 0;
+                    const double t = result->ma_spline_traj.trajectory.getStartTime() + local_t;
 
-                // 跳过新轨迹上已经过去的折叠事件
-                // 并确定当前时刻“应该处于什么状态”
-                bool desired_fold_state = current_fold_state_;
+                    const Eigen::Vector3d p = result->ma_spline_traj.trajectory.getTrajectory().evaluate(t, 0);
 
-                while (next_fold_event_idx_ < fold_events_.size() && fold_events_[next_fold_event_idx_].time <= t_track_
-                ) {
-                    desired_fold_state = fold_events_[next_fold_event_idx_].fold;
-                    ++next_fold_event_idx_;
-                }
-
-                // 如果新轨迹当前时刻应该的状态和实际下发状态不一致，立即补发一次
-                if (desired_fold_state != current_fold_state_) {
-                    //publish_fold_cmd(desired_fold_state);
-                    current_fold_state_ = desired_fold_state;
-                }
-                if (current_XYTheta.has_value()) {
-                    Eigen::Vector2d pos(current_XYTheta->x(), current_XYTheta->y());
-                    t_track_ = ma_traj_interface_->nearest_time(pos);
-                } else {
-                    t_track_ = 0.0;
-                }
-
-                //可视化
-                std::vector<Eigen::Vector3d> fold_pts, unfold_pts;
-
-                if (result->ma_spline_traj.success && result->ma_spline_traj.trajectory.isInitialized()) {
-                    for (const auto& event: fold_events_) {
-                        const double local_t =
-                            std::clamp(event.time, 0.0, result->ma_spline_traj.trajectory.getDuration());
-
-                        const double t = result->ma_spline_traj.trajectory.getStartTime() + local_t;
-
-                        const Eigen::Vector3d p = result->ma_spline_traj.trajectory.getTrajectory().evaluate(t, 0);
-
-                        if (event.fold) {
-                            fold_pts.push_back(p);
-                        } else {
-                            unfold_pts.push_back(p);
-                        }
+                    if (event.fold) {
+                        fold_pts.push_back(p);
+                    } else {
+                        unfold_pts.push_back(p);
                     }
                 }
-
-                visualizer.visualizeTunnelAndFold(
-                    result->ma_spline_traj,
-                    route,
-                    *ma_map_->get_grid_map(),
-                    fold_pts,
-                    unfold_pts
-                );
             }
+
+            visualizer
+                .visualizeTunnelAndFold(result->ma_spline_traj, route, *ma_map_->get_grid_map(), fold_pts, unfold_pts);
         }
+        pub_nav_feedback();
     } else {
         auto result = fsm_replanner.minco_plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
         if (result) {
@@ -343,7 +375,24 @@ void GlobalPlanner2d::plan_omni() {
         }
     }
 }
-
+auto GlobalPlanner2d::pub_nav_feedback() -> std_msgs::msg::Int16 {
+    std_msgs::msg::Int16 msg;
+    switch (nav_state) {
+        case replan::FsmReplan::PathState::IDLE:
+            msg.data = 0;
+            break;
+        case replan::FsmReplan::PathState::RUNNING:
+            msg.data = 1;
+            break;
+        case replan::FsmReplan::PathState::FAILED:
+            msg.data = 2;
+            break;
+        case replan::FsmReplan::PathState::SUCCESSED:
+            msg.data = 3;
+            break;
+    }
+    return msg;
+};
 void GlobalPlanner2d::odom_callback(const nav_msgs::msg::Odometry::SharedPtr& msg) {
     if (!current_pose.has_value()) {
         current_pose = utils::RobotState();
@@ -424,7 +473,7 @@ void GlobalPlanner2d::target_callback(const geometry_msgs::msg::PoseStamped::Sha
         temp_goal_pose.yaw = atan2(msg->pose.orientation.z, msg->pose.orientation.w) * 2.0;
         goal_pose = temp_goal_pose;
         logger::info(logger::ros2, "set goal success");
-
+        plan_start_time_=std::chrono::steady_clock::now();
     } else {
         logger::warn(logger::ros2, "map no init");
     }

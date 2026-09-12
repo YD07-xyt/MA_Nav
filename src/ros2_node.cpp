@@ -254,9 +254,24 @@ void GlobalPlanner2d::plan_omni() {
         logger::debug(logger::ros2, "no current_pose");
         return;
     }
+        // 1. 每帧先判断是否到达，不受 plan_start_time_ 是否为空影响
+    const double dist_to_goal =
+        (current_pose->p.head<2>() - goal_pose->p.head<2>()).norm();
 
+    if (dist_to_goal < config.planner_config.replan_params.goal_reached_radius) {
+        nav_state = replan::FsmReplan::PathState::SUCCESSED;
+
+        auto msg = pub_nav_feedback();       // 打印 SUCCESSED
+        nav_feedback_pub_->publish(msg);
+
+        // 到达后收尾，避免重复触发
+        goal_pose.reset();
+        //ma_traj_interface_.reset();          // 停止控制器跟踪
+        //plan_start_time_.reset();
+        return;
+    }
     const auto now = std::chrono::steady_clock::now();
-    if(!plan_start_time_.has_value()){
+    if (!plan_start_time_.has_value()) {
         //logger::warn(logger::ros2,"plan_start_time_ is not value");
         return;
     }
@@ -285,6 +300,8 @@ void GlobalPlanner2d::plan_omni() {
             }
             return;
         }
+
+
         plan_start_time_.reset();
         visualizer.PubGlobalPath(path_result.planning_traj.raw_path);
         visualizer.PubOptPath(path_result.planning_traj.optimized_path);
@@ -356,7 +373,9 @@ void GlobalPlanner2d::plan_omni() {
             visualizer
                 .visualizeTunnelAndFold(result->ma_spline_traj, route, *ma_map_->get_grid_map(), fold_pts, unfold_pts);
         }
-        pub_nav_feedback();
+        auto msg = pub_nav_feedback();
+
+        nav_feedback_pub_->publish(msg);
     } else {
         auto result = fsm_replanner.minco_plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
         if (result) {
@@ -380,14 +399,18 @@ auto GlobalPlanner2d::pub_nav_feedback() -> std_msgs::msg::Int16 {
     switch (nav_state) {
         case replan::FsmReplan::PathState::IDLE:
             msg.data = 0;
+            logger::info(logger::ros2, "nav_feedback:msg:IDLE");
             break;
         case replan::FsmReplan::PathState::RUNNING:
             msg.data = 1;
+            logger::info(logger::ros2, "nav_feedback:msg:RUNNING");
             break;
         case replan::FsmReplan::PathState::FAILED:
             msg.data = 2;
+            logger::info(logger::ros2, "nav_feedback:msg:FAILED");
             break;
         case replan::FsmReplan::PathState::SUCCESSED:
+            logger::info(logger::ros2, "nav_feedback:msg:SUCCESSED");
             msg.data = 3;
             break;
     }
@@ -459,21 +482,29 @@ void GlobalPlanner2d::pub_callback() {
 }
 
 void GlobalPlanner2d::target_callback(const geometry_msgs::msg::PoseStamped::SharedPtr& msg) {
-    logger::info(
-        logger::ros2,
-        "Received target pose with position ({:2f},{:2f},{:2f})",
-        msg->pose.position.x,
-        msg->pose.position.y,
-        msg->pose.position.z
-    );
+    // logger::info(
+    //     logger::ros2,
+    //     "Received target pose with position ({:2f},{:2f},{:2f})",
+    //     msg->pose.position.x,
+    //     msg->pose.position.y,
+    //     msg->pose.position.z
+    // );
     if (mapInitialized) {
-        const Eigen::Vector3d goal(msg->pose.position.x, msg->pose.position.y, 0.0);
+        
+        const Eigen::Vector3d goal(msg->pose.position.x, msg->pose.position.y, 1.0);
+        if(old_goal_pose_==goal){
+            //logger::warn(logger::ros2,"old_goal_pose_==goal");
+            return;
+        }
         utils::RobotState temp_goal_pose;
+        
         temp_goal_pose.p = goal;
         temp_goal_pose.yaw = atan2(msg->pose.orientation.z, msg->pose.orientation.w) * 2.0;
         goal_pose = temp_goal_pose;
-        logger::info(logger::ros2, "set goal success");
-        plan_start_time_=std::chrono::steady_clock::now();
+        old_goal_pose_ = goal;
+        nav_state=replan::FsmReplan::PathState::RUNNING;
+        //logger::info(logger::ros2, "set goal success");
+        plan_start_time_ = std::chrono::steady_clock::now();
     } else {
         logger::warn(logger::ros2, "map no init");
     }

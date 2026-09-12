@@ -96,6 +96,7 @@ private:
     Visualizer visualizer;
 
 private:
+    Eigen::Vector3d old_goal_pose_=Eigen::Vector3d::Zero();
     //地图
     std::shared_ptr<grid_map::GridMap> grid_map_;
     std::shared_ptr<ma_map::MaMap> ma_map_;

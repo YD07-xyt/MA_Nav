@@ -1,0 +1,78 @@
+{
+  "schema": "ma_nav.verify.v1",
+  "module": "path_planning",
+  "docs": "docs/nav/planner/path_planning",
+  "status": "NEEDS_FIX",
+  "error_count": 0,
+  "warning_count": 9,
+  "evidence_digest": "7c453c4e8af72579",
+  "git_rev": "2eed7d3e884d",
+  "worktree_dirty": true,
+  "dirty_source_files": [
+    "src/planner/controller/src/mpc.cpp",
+    "src/planner/traj_optimize/src/ma_spline_opt/traj_optimizer.cpp",
+    "src/planner/traj_optimize/include/traj_optimize/opt.md"
+  ],
+  "errors": [],
+  "warnings": [
+    {
+      "check": "review.pending",
+      "doc": "docs/nav/planner/path_planning/README.md",
+      "line": 1,
+      "message": "status=draft，尚未通过人工审核；人工确认后改为 reviewed"
+    },
+    {
+      "check": "review.pending",
+      "doc": "docs/nav/planner/path_planning/依赖关系.md",
+      "line": 1,
+      "message": "status=draft，尚未通过人工审核；人工确认后改为 reviewed"
+    },
+    {
+      "check": "review.pending",
+      "doc": "docs/nav/planner/path_planning/常见问题FAQ.md",
+      "line": 1,
+      "message": "status=draft，尚未通过人工审核；人工确认后改为 reviewed"
+    },
+    {
+      "check": "review.pending",
+      "doc": "docs/nav/planner/path_planning/待确认清单.md",
+      "line": 1,
+      "message": "status=draft，尚未通过人工审核；人工确认后改为 reviewed"
+    },
+    {
+      "check": "review.pending",
+      "doc": "docs/nav/planner/path_planning/接口文档.md",
+      "line": 1,
+      "message": "status=draft，尚未通过人工审核；人工确认后改为 reviewed"
+    },
+    {
+      "check": "review.pending",
+      "doc": "docs/nav/planner/path_planning/模块设计说明.md",
+      "line": 1,
+      "message": "status=draft，尚未通过人工审核；人工确认后改为 reviewed"
+    },
+    {
+      "check": "review.pending",
+      "doc": "docs/nav/planner/path_planning/流程图.md",
+      "line": 1,
+      "message": "status=draft，尚未通过人工审核；人工确认后改为 reviewed"
+    },
+    {
+      "check": "review.pending",
+      "doc": "docs/nav/planner/path_planning/测试要点.md",
+      "line": 1,
+      "message": "status=draft，尚未通过人工审核；人工确认后改为 reviewed"
+    },
+    {
+      "check": "review.pending",
+      "doc": "docs/nav/planner/path_planning/配置说明.md",
+      "line": 1,
+      "message": "status=draft，尚未通过人工审核；人工确认后改为 reviewed"
+    }
+  ],
+  "coverage": {
+    "module_files": 8,
+    "mentioned_files": 8,
+    "missing_files": []
+  }
+}

@@ -269,7 +269,7 @@ inline void load_planner_config(const YAML::Node& node, replan::FsmReplan::Plann
 // 控制: [ax, ay]
 // ============================================================
 
-inline void load_mpc_param(const YAML::Node& node, control::Mpc::Param& param) {
+inline void load_mpc_param(const YAML::Node& node, control::MpcParam& param) {
     if (!node) return;
 
     if (node["N"]) param.N = node["N"].as<int>();
@@ -311,7 +311,7 @@ struct Config {
     std::string global_map_path;
 
     replan::FsmReplan::PlannerConfig planner_config;
-    control::Mpc::Param mpc_params;
+    control::MpcParam mpc_params;
 
     explicit Config(std::string params_path) {
         YAML::Node config = YAML::LoadFile(params_path);

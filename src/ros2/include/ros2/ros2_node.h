@@ -143,7 +143,7 @@ private:
     Trajectory<5, 2> minco_trajectory_;
 
 private:
-    control::Mpc mpc_;
+    control::Mpc<control::MaSplineTrajectoryInterface> mpc_;
     std::shared_ptr<control::MaSplineTrajectoryInterface> ma_traj_interface_;
     double t_track_ = 0.0;
     // 保存上一帧 MPC 的 world 速度指令，作为下一帧 x0 的速度状态

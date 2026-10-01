@@ -25,4 +25,5 @@ target_link_libraries(${PROJECT_NAME}
     osqp::osqp
     OsqpEigen::OsqpEigen
     traj_optimize
+    path_planning
 )

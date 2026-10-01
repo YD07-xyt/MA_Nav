@@ -24,27 +24,27 @@ namespace minco_opt {
  * 注意:构造后 map 指针必须保持有效,直到优化结束
  *       (由调用方持有的 shared_ptr 保证)。
  */
-class GridMapESDF : public ESDFInterface {
+class GridMapESDF : public ESDFInterface<GridMapESDF> {
 public:
-    explicit GridMapESDF(std::shared_ptr<grid_map::GridMap> map) : map_(std::move(map)) {}
+    explicit GridMapESDF(std::shared_ptr<const grid_map::GridMap> map) : map_(std::move(map)) {}
 
-    double getDistance(double x, double y) const override {
+    auto getDistance(double x, double y) const ->double{
         return map_->getDistance(Eigen::Vector2d(x, y));
     }
 
-    Eigen::Vector2d getGradient(double x, double y) const override {
+    auto getGradient(double x, double y) const -> Eigen::Vector2d {
         double d = 0.0;
         Eigen::Vector2d grad = Eigen::Vector2d::Zero();
         map_->getDistanceAndGradient(Eigen::Vector2d(x, y), d, grad);
         return grad;
     }
 
-    bool isInside(double x, double y) const override {
+    auto isInside(double x, double y) const ->bool {
         return map_->isInsideMap(Eigen::Vector2d(x, y));
     }
 
 private:
-    std::shared_ptr<grid_map::GridMap> map_;
+    std::shared_ptr<const grid_map::GridMap> map_;
 };
 
 } // namespace minco_opt

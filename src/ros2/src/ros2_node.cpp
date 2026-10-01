@@ -169,12 +169,12 @@ void GlobalPlanner2d::controller_callback() {
     }
 
     // 4 状态 MPC: [x, y, vx, vy]
-    control::Mpc::StateVector x0;
+    control::StateVector x0;
     x0 << current_XYTheta->x(), current_XYTheta->y(), vx_world_state, vy_world_state;
 
-    control::Mpc::InputVector u_cmd;
-    std::vector<control::Mpc::StateVector> predicted_states;
-    std::vector<control::Mpc::InputVector> predicted_inputs;
+    control::InputVector u_cmd;
+    std::vector<control::StateVector> predicted_states;
+    std::vector<control::InputVector> predicted_inputs;
 
     if (!mpc_.solve(x0, t_now, u_cmd, predicted_states, predicted_inputs)) {
         // 调试时打印 x0，确认是不是速度导致 infeasible

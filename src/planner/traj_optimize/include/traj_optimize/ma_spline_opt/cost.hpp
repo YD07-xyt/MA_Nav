@@ -9,10 +9,10 @@
 
 namespace ma_spline_opt {
 
-template <int DIM>
+template <int DIM, typename ESDF>
 struct RobotIntegralCost
 {
-    const ESDFInterface* esdf = nullptr;
+    const ESDF* esdf = nullptr;
 
     double w_obs = 8000.0;
     double safe_distance = 0.3;

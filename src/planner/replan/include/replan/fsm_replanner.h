@@ -95,7 +95,7 @@ public:
 
 private:
     path_planning::PathPlanning path_planning;
-    ma_spline_opt::MaSplineTrajectoryOptimizer ma_opt_;
+    ma_spline_opt::MaSplineTrajectoryOptimizer<minco_opt::GridMapESDF> ma_opt_;
     enum MincoError { OPTFAIL, TIMEDOUT };
 
 private:

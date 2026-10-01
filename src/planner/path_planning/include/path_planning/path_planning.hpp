@@ -1,0 +1,39 @@
+#pragma once
+#include "utils/logger.hpp"
+#include "path_planning/search/astar.h"
+#include "path_planning/search/jps.h"
+#include "path_planning/post_processing.h"
+#include <optional>
+namespace path_planning {
+
+class PathPlanningImpl;
+
+class PathPlanning {
+private:
+    std::unique_ptr<PathPlanningImpl> impl_;
+
+public:
+    PathPlanning();
+    ~PathPlanning();                       // ← 显式声明析构函数
+    PathPlanning(PathPlanning&&) noexcept;  // 移动构造/赋值也要声明
+    PathPlanning& operator=(PathPlanning&&) noexcept;
+
+    // 禁止拷贝（unique_ptr 本身不可拷贝）
+    PathPlanning(const PathPlanning&) = delete;
+    PathPlanning& operator=(const PathPlanning&) = delete;
+public:
+    auto set_map(const grid_map::GridMap& grid_map) -> void;
+    auto set_param(const PathPostProcessing::PathPostProcessingParams& params) -> void;
+    auto set_velocity(const Eigen::Vector3d& start_vel, const Eigen::Vector3d& end_vel)->void;
+
+    // 选择底层图搜索算法:默认 A*,开启后改用 JPS
+    auto set_use_jps(bool use_jps) -> void;
+    auto path_planning(
+        const Eigen::Vector2d& start,
+        const Eigen::Vector2d& goal,
+        double start_yaw,
+        double goal_yaw,
+        int timeout_ms
+    ) -> std::optional<PathPostProcessing::Trajectory>;
+};
+}

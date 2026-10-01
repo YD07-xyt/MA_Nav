@@ -8,7 +8,7 @@ ros2:
   save_global_map_path:  "/home/xyt/map/src/MA_Nav/map"
   save_map_srv_topic: "/save_global_map"
   map_params_path: "/home/xyt/map/src/MA_Nav/config/map.yaml"   # 地图参数
-  global_map_path: "/home/xyt/map/src/MA_Nav/map/global_map.pgm" # 全局栅格地图
+  global_map_path: "/home/xyt/map/src/MA_Nav/map/global_maps.pgm" # 全局栅格地图
   is_minco: false
     # 点击隧道区域保存/加载
   tunnel_regions_path: "/home/xyt/map/src/MA_Nav/maps/tunnel_regions.yaml"
@@ -88,27 +88,6 @@ planner_config:
       lbfgs_mem_size: 64
       lbfgs_delta: 5e-3
 
-  # ---------- MINCO 轨迹优化参数 ----------
-  minco_opt_params:
-    weight_smooth: 5.0        # 平滑代价权重：越大轨迹越平滑，可抑制过弯振荡；
-                              # 但太大会过度拉直，可能切弯/靠近障碍物
-    weight_obstacle: 8000.0    # 避障代价权重：越大越远离障碍物；
-                              # 太大可能导致轨迹在窄缝中过于保守
-    weight_feasibility: 40.0  # 速度/加速度可行性软约束权重：
-                              # 越大越不容易超速/超加速度
-    weight_time: 20.0         # 时间代价权重：越大总时间越短、速度越快；
-                              # 但太大会把时间压得过短，可能触发速度/加速度极限
-    weight_mean_time: 40.0    # 平均时间约束权重：让各段时间不要过于不均匀，
-                              # 防止某一段特别慢或特别快
-    max_vel: 3.0              # MINCO 最大速度 (m/s)，轨迹速度软约束上限
-    max_acc: 5.0              # MINCO 最大加速度 (m/s²)，轨迹加速度软约束上限
-    safe_distance: 0.3       # MINCO 避障安全距离 (m)，轨迹离障碍物至少保持这个距离
-    mean_time_lower_bound: 0.9  # 平均时间下界比例：每段不得短于平均时间的 0.9 倍
-    mean_time_upper_bound: 1.1  # 平均时间上界比例：每段不得长于平均时间的 1.1 倍
-    integral_resolution: 8      # 每段轨迹积分采样点数：越大避障/可行性评估越精细，但更慢
-    max_iterations: 8000         # L-BFGS 最大迭代次数
-    g_epsilon: 1e-4             # 梯度收敛阈值，越小优化越精细
-    min_time: 0.1               # 最小段时间 (s)，防止某段被优化得过短
 
   # ---------- 重规划参数 ----------
   replan_params:

@@ -7,6 +7,10 @@
     sudo apt install libompl-dev
 ```
 
+```sh
+git clone --recursive -b release-0.6.3 https://github.com/oxfordcontrol/osqp.git
+```
+
 mpc casadi
 ```sh
     sudo apt-get install swig

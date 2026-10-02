@@ -296,7 +296,7 @@ void GlobalPlanner2d::plan_omni() {
 
         plan_start_time_ = now;
         visualizer.PubGlobalPath(path_result.planning_traj.raw_path);
-        visualizer.PubOptPath(path_result.planning_traj.optimized_path);
+        visualizer.PubOptPath(path_result.ma_spline_traj.trajectory);
 
         std::vector<Eigen::Vector3d> route;
         for (auto point: path_result.planning_traj.optimized_path) {
@@ -378,7 +378,7 @@ auto GlobalPlanner2d::pub_nav_feedback() -> std_msgs::msg::Int16 {
             break;
         case replan::FsmReplan::PathState::RUNNING:
             msg.data = 1;
-            logger::info(logger::ros2, "nav_feedback:msg:RUNNING");
+            //logger::info(logger::ros2, "nav_feedback:msg:RUNNING");
             break;
         case replan::FsmReplan::PathState::FAILED:
             msg.data = 2;

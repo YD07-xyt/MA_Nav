@@ -512,6 +512,97 @@ public:
 
         OptPathPub->publish(nav_path);
     };
+    // 将 SplineTrajectory::QuinticSplineND<3> 按固定步长采样后，作为 nav_msgs::Path 发布
+// D=3 时第 3 维视作 yaw（不作为 z），Path 里只取前两维 (x, y)
+void PubOptPath(const SplineTrajectory::QuinticSplineND<3>& traj, const std::string& frame_id = "world") {
+    if (!OptPathPub) return;
+    if (!traj.isInitialized() || traj.getNumSegments() <= 0) return;
+
+    const double t_start = traj.getStartTime();
+    const double t_end   = traj.getEndTime();
+    if (!(t_end > t_start)) return;
+
+    // 采样步长（可按需调整）
+    constexpr double dt = 0.05;
+
+    nav_msgs::msg::Path nav_path;
+    nav_path.header.frame_id = frame_id;
+    nav_path.header.stamp = node->now();
+
+    auto push_pose = [&](const Eigen::Matrix<double, 3, 1>& pos) {
+        geometry_msgs::msg::PoseStamped pose_stamped;
+        pose_stamped.header = nav_path.header;
+        pose_stamped.pose.position.x = pos(0);
+        pose_stamped.pose.position.y = pos(1);
+        pose_stamped.pose.position.z = 0.0;   // 第 3 维是 yaw，不作为 z 使用
+        // 若需要把 yaw 写入四元数，可打开下面两行：
+        // const double yaw = pos(2);
+        // pose_stamped.pose.orientation.z = std::sin(0.5 * yaw);
+        // pose_stamped.pose.orientation.w = std::cos(0.5 * yaw);
+        pose_stamped.pose.orientation.x = 0.0;
+        pose_stamped.pose.orientation.y = 0.0;
+        pose_stamped.pose.orientation.z = 0.0;
+        pose_stamped.pose.orientation.w = 1.0;
+        nav_path.poses.push_back(std::move(pose_stamped));
+    };
+
+    for (double t = t_start; t <= t_end + 1e-6; t += dt) {
+        push_pose(traj.getTrajectory().evaluate(t, 0));
+    }
+
+    // 保证终点一定被包含（避免因步长未整除而丢掉末端）
+    push_pose(traj.getTrajectory().evaluate(t_end, 0));
+
+    OptPathPub->publish(nav_path);
+}
+    // 将 SplineTrajectory::PPolyND<2, 6> 按固定步长采样后，作为 nav_msgs::Path 发布
+void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_id = "world") {
+    if (!OptPathPub) return;
+
+    const auto& breakpoints = traj.getBreakpoints();
+    if (breakpoints.empty()) return;
+
+    const double t_start = breakpoints.front();
+    const double t_end   = breakpoints.back();
+    if (!(t_end > t_start)) return;
+
+    // 采样步长（可按需调整：采样过密会显著增大消息体积）
+    constexpr double dt = 0.05;
+
+    nav_msgs::msg::Path nav_path;
+    nav_path.header.frame_id = frame_id;
+    nav_path.header.stamp = node->now();
+
+    for (double t = t_start; t <= t_end + 1e-6; t += dt) {
+        Eigen::Vector2d pos = traj.evaluate(t, 0);
+
+        geometry_msgs::msg::PoseStamped pose_stamped;
+        pose_stamped.header = nav_path.header;
+        pose_stamped.pose.position.x = pos.x();
+        pose_stamped.pose.position.y = pos.y();
+        pose_stamped.pose.position.z = 0.0;
+        pose_stamped.pose.orientation.x = 0.0;
+        pose_stamped.pose.orientation.y = 0.0;
+        pose_stamped.pose.orientation.z = 0.0;
+        pose_stamped.pose.orientation.w = 1.0;
+
+        nav_path.poses.push_back(std::move(pose_stamped));
+    }
+
+    // 保证终点一定被包含（避免因步长未整除而丢掉末端）
+    {
+        Eigen::Vector2d pos = traj.evaluate(t_end, 0);
+        geometry_msgs::msg::PoseStamped pose_stamped;
+        pose_stamped.header = nav_path.header;
+        pose_stamped.pose.position.x = pos.x();
+        pose_stamped.pose.position.y = pos.y();
+        pose_stamped.pose.position.z = 0.0;
+        pose_stamped.pose.orientation.w = 1.0;
+        nav_path.poses.push_back(std::move(pose_stamped));
+    }
+
+    OptPathPub->publish(nav_path);
+}
     void PubGlobalPath(std::vector<Eigen::Vector2d>& path) {
         nav_msgs::msg::Path nav_path;
         nav_path.header.frame_id = "world";

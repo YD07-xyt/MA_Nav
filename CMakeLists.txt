@@ -11,20 +11,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_BUILD_TYPE "Release")
 # set(CMAKE_CXX_FLAGS_RELEASE "-O3  -Wall -g -DNDEBUG -march=native")
 #set(CMAKE_CXX_FLAGS_RELEASE "-O3  -Wall -g -DNDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3  -g -DNDEBUG")
+#set(CMAKE_CXX_FLAGS_RELEASE "-O3  -g -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3  -DNDEBUG")
 #########################################################
 ###################     LTO     #########################
 #########################################################
-include(CheckIPOSupported)
-check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+# include(CheckIPOSupported)
+# check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
 
-if(ipo_supported)
-    # 显式使用并行 LTO，避免 GCC 12+ 默认串行 LTRANS
-    add_compile_options($<$<CONFIG:Release>:-flto=auto>)
-    add_link_options($<$<CONFIG:Release>:-flto=auto>)
-else()
-    message(WARNING "IPO/LTO 不被支持: ${ipo_error}")
-endif()
+# if(ipo_supported)
+#     # 显式使用并行 LTO，避免 GCC 12+ 默认串行 LTRANS
+#     add_compile_options($<$<CONFIG:Release>:-flto=auto>)
+#     add_link_options($<$<CONFIG:Release>:-flto=auto>)
+# else()
+#     message(WARNING "IPO/LTO 不被支持: ${ipo_error}")
+# endif()
 #########################################################
 
 

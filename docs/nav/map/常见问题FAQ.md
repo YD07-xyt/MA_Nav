@@ -1,9 +1,9 @@
 ---
 module: map
 doc: 常见问题FAQ
-git_rev: 2eed7d3e884d
-evidence_digest: 7c453c4e8af72579
-worktree_dirty: true
+git_rev: 8f98daee5bc7
+evidence_digest: be346b5265f1410d
+worktree_dirty: false
 generated_by: dsh + docs/tools
 generated_at: 2026-10-02T00:30:00Z
 status: draft
@@ -46,9 +46,9 @@ reviewer: 未审核
 第一道检查在 `src/map/include/map/ma_map.hpp:103`，
 第二道在 `src/map/include/map/ma_map.hpp:109`。
 
-**处理**：确认里程计话题名与 `rog_map.ros_callback.odom_topic` 一致
-（YAML 值为 `/lio/base_odom`，代码默认值是 `/lio/odom`，
-两者不同是本仓库已知的坑）；确认 `odom_timeout` 不是被退回的默认 0.05。
+**处理**：确认订阅用的里程计话题名（来自 ros2 段的 odom 话题名，`config/planner.yaml:6`）与实际发布话题一致；
+注意 `rog_map.ros_callback.odom_topic`（YAML `/lio/base_odom`、代码默认 `/lio/odom`）**当前是死配置**，改它不会影响订阅；
+再确认 `odom_timeout` 不是被退回的默认 0.05。
 
 ## Q3：一条告警一直刷：No point cloud input, check the topic name.
 
@@ -58,8 +58,8 @@ reviewer: 未审核
 且 `ros_callback.enable` 为真时按 1 秒节流打印。
 锚点：`src/map/include/map/ma_map.hpp:56`。
 
-**处理**：检查 cloud 话题名与 `rog_map.ros_callback.cloud_topic`
-（YAML 值 `/lio/cloud_world`）是否一致。锚点：`config/map.yaml:1`。
+**处理**：检查 cloud 话题名与 ros2 段的话题名（`rog_map.ros_callback.cloud_topic` 为死配置，改它不影响订阅）——原表述里的 `rog_map.ros_callback.cloud_topic`
+（YAML 值 `/lio/cloud_world`）是否一致；注意该键同样是**死配置**，真实订阅话题来自 ros2 段。锚点：`config/map.yaml:23`。
 
 ## Q4：另一条告警：Unfinished frame cnt > 1, the map may not work in real-time
 
@@ -93,7 +93,7 @@ x 属于负的 `x_left` 到正的 `x_right`，y 同理。
 
 **现象**：`rog_map.esdf.enable` 当前为 false，但仍可从 `ProbMap` 取到 ESDF 子地图。
 
-**原因**：`ProbMap` 始终持有 `esdf_map_`，并提供访问器，
+**原因**：`ProbMap` 只在**开启 ESDF** 时创建 `esdf_map_`（并提供访问器）；当前配置下 ESDF 关闭，因此该指针为空、访问器返回空指针，
 没有在接口层根据 `esdf.enable` 做分支。
 锚点：`src/map/include/map/3d_occ_map/prob_map.h:112`、
 `src/map/include/map/3d_occ_map/prob_map.h:120`。
@@ -114,9 +114,9 @@ x 属于负的 `x_left` 到正的 `x_right`，y 同理。
 
 | 手段 | 用法 | 代码位置 |
 |---|---|---|
-| 地图可视化 | 订阅 `/ma_nav/map/occ` 等话题 | `src/ros2/src/ros2_node.cpp:77` |
-| 2D 栅格可视化 | 订阅 `/ma_nav/grid_map_occ` | `src/ros2/src/ros2_node.cpp:72` |
-| 局部地图边界 | 订阅 `/ma_nav/map/map_bound` | `src/ros2/src/ros2_node.cpp:83` |
+| 地图可视化 | 订阅 `/ma_nav/map/occ` 等话题 | `src/ros2/include/ros2/misc/visualizer.hpp:77` |
+| 2D 栅格可视化 | 订阅 `/ma_nav/grid_map_occ` | `src/ros2/include/ros2/misc/visualizer.hpp:72` |
+| 局部地图边界 | 订阅 `/ma_nav/map/map_bound` | `src/ros2/include/ros2/misc/visualizer.hpp:83` |
 | 地图信息日志 | `writeMapInfoToLog` 写入日志文件 | `src/map/include/map/3d_occ_map/prob_map.h:107` |
 | 耗时日志 | `writeTimeConsumingToLog` | `src/map/include/map/3d_occ_map/prob_map.h:105` |
 | 地图信息打印 | `printMapInformation` | `src/map/include/map/3d_occ_map/sliding_map.h:64` |

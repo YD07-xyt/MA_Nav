@@ -4,17 +4,25 @@
   "docs": "docs/nav/map",
   "status": "NEEDS_FIX",
   "error_count": 0,
-  "warning_count": 9,
-  "evidence_digest": "7c453c4e8af72579",
-  "git_rev": "2eed7d3e884d",
-  "worktree_dirty": true,
-  "dirty_source_files": [
-    "src/planner/controller/src/mpc.cpp",
-    "src/planner/traj_optimize/src/ma_spline_opt/traj_optimizer.cpp",
-    "src/planner/traj_optimize/include/traj_optimize/opt.md"
-  ],
+  "warning_count": 11,
+  "evidence_digest": "be346b5265f1410d",
+  "git_rev": "8f98daee5bc7",
+  "worktree_dirty": false,
+  "dirty_source_files": [],
   "errors": [],
   "warnings": [
+    {
+      "check": "evidence.rev_drift",
+      "doc": "-",
+      "line": null,
+      "message": "证据包中 8 个文件生成于 2eed7d3e884d，与文档声明的 git_rev 8f98daee5bc7 不同（例如 docs/_evidence/controller/inventory.json）；evidence_digest 不含源码内容，源码是否漂移需另行核对"
+    },
+    {
+      "check": "evidence.rev_drift",
+      "doc": "-",
+      "line": null,
+      "message": "证据包中 1 个文件生成于 f150fbcca0c7，与文档声明的 git_rev 8f98daee5bc7 不同（例如 docs/_evidence/utils/inventory.json）；evidence_digest 不含源码内容，源码是否漂移需另行核对"
+    },
     {
       "check": "review.pending",
       "doc": "docs/nav/map/README.md",

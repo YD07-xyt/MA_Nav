@@ -1,9 +1,9 @@
 ---
 module: traj_optimize
 doc: 常见问题FAQ
-git_rev: 2eed7d3e884d
-evidence_digest: 7c453c4e8af72579
-worktree_dirty: true
+git_rev: 8f98daee5bc7
+evidence_digest: be346b5265f1410d
+worktree_dirty: false
 generated_by: dsh + docs/tools（clangd documentSymbol / python extractors）
 generated_at: 2026-10-02T03:00:00Z
 status: draft
@@ -38,7 +38,7 @@ reviewer: 未审核
 ## Q3：模块里为什么有两套 `SplineTrajectory.hpp` / `SplineOptimizer.hpp`？该改哪一套？
 
 **原因**：模块自带的说明写明了取舍
-（`src/planner/traj_optimize/include/traj_optimize/opt.md:1-4`）：
+（`src/planner/traj_optimize/include/traj_optimize/opt.md:1-5`）：
 `ma_spline_opt` 是目前主要的代码，`spline_opt` 是后续更新用的代码。
 全仓库的 include 检索也印证了这一点：replan、controller、ros2 只引用 `ma_spline_opt/`
 （`src/planner/replan/include/replan/fsm_replanner.h:5`）。
@@ -49,15 +49,19 @@ reviewer: 未审核
 ## Q4：`gcopter` 目录会参与编译吗？
 
 **原因**：作者注明 gcopter 是 Minco 原实现、未使用
-（`src/planner/traj_optimize/include/traj_optimize/opt.md:4`），
+（`src/planner/traj_optimize/include/traj_optimize/opt.md:5`），
 且全仓库没有任何 include 指向 `gcopter/minco.hpp`、`gcopter/lbfgs.hpp`、`gcopter/sdlp.hpp`。
+补充：可视化头里那个以 gcopter 轨迹为形参的重载（`src/ros2/include/ros2/misc/visualizer.hpp:349`）**没有任何调用点**——
+被注释掉的那处调用（`src/ros2/src/ros2_node.cpp:306`）传的是优化输出，匹配的是同名的样条重载（`src/ros2/include/ros2/misc/visualizer.hpp:337`）。
 
 **处理**：`gcopter/trajectory.hpp` 是个例外——它被 ros2 的可视化头 include
 （`src/ros2/include/ros2/misc/visualizer.hpp:7`），
 而且该头里确实有一个以 gcopter 的 Trajectory 为形参、调用它的接口的重载
 （`src/ros2/include/ros2/misc/visualizer.hpp:349`）。
-但这个重载**没有调用点**（唯一调用处已被注释，见 `src/ros2/src/ros2_node.cpp:306`），
-因此模板从未被实例化。【待确认】是删掉这个 include 与死重载，还是把它接入流程。
+但这个重载**没有调用点**（唯一调用处已被注释，见 `src/ros2/src/ros2_node.cpp:306`）。
+不过 gcopter 的 Trajectory 模板并非完全未使用：ros2 侧还声明了一个
+Trajectory<5, 2> 成员（`src/ros2/include/ros2/ros2_node.h:143`），该成员同样没有使用点，
+但成员声明本身已经让模板实例化。【待确认】是删掉这些死代码，还是把它们接入流程。
 
 ## Q5：yaw 是怎么被优化的？为什么 2D 模式下输出的 yaw 全是 0？
 

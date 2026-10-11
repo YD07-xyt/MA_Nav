@@ -162,8 +162,9 @@ ros2_node.cpp:33 构造 MaMap
 3. **两侧对不上就如实登记**：`unresolved_paths`（代码读、YAML 无）4 条、
    `unread_keys` 28 条（全在 planner.yaml）、`subnode_reads` 70 条，
    全部进入 `待确认清单.md`，不允许 AI 猜。
-4. **人工审核做成机器闸门**：`status: draft` / `reviewer` 未填即 `review.pending`，
-   AI 无法自行绕过得到 `PASS`。
+4. **人工审核做成机器闸门**：`status: draft` 即 `review.pending`；`reviewer` 只对空值/`TODO`/`待填`/`unknown` 告警。
+   因此准确说法是：**AI 不能在不改 `status` 的情况下拿到 PASS**——`status` 本身是否真的经过人工确认，
+   校验器无法验证，只能靠流程约束（见本轮第三方审核的 D-2：把 `status` 改成 `reviewed` 即可得到 0 警告）。
 5. **文档时效可检测**：`evidence_digest` + `git_rev` + `worktree_dirty`
    三项写入 front-matter；`worktree_dirty` 与只读 `git status` 交叉核对，
    声明 false 而实际有改动即 FAIL。
@@ -339,6 +340,9 @@ planner 四个模块（path_planning / traj_optimize / controller / replan）的
    - `docs/tools/test_injection.py --root .` → **PASS**（前置条件「map 原文档 errors=0」恢复成立，
      三类注入幻觉仍全部被识破）。
 
-**当前一致性**：map / path_planning / traj_optimize / controller / replan 五个模块共 **45 篇文档**
-共用同一份证据摘要 `7c453c4e8af72579`，全部 `errors=0`，非 `review.pending` 警告为 0。
-仍未完成的只有人工审核闸门（45 篇均为 `status: draft`）。
+**当时的一致性**（本节写于 5 个模块阶段）：map / path_planning / traj_optimize / controller / replan
+共 45 篇文档共用同一份证据摘要 `7c453c4e8af72579`，全部 `errors=0`，非 `review.pending` 警告为 0。
+
+**最新基线（2026-10-02 追加，以本节为准）**：新增 `ros2` 与 `utils` 两个模块后共 **7 个模块 / 63 篇**，
+统一为 `git_rev: 8f98daee5bc7`、`evidence_digest: be346b5265f1410d`、`worktree_dirty: false`，
+全部 `errors=0`；仍未完成的只有人工审核闸门（63 篇均为 `status: draft`）。

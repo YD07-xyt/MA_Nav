@@ -67,8 +67,8 @@ docs/_evidence/
 ---
 module: map
 doc: 配置说明
-git_rev: 2eed7d3e884d
-evidence_digest: 1ab15719a7937f37
+git_rev: 8f98daee5bc7
+evidence_digest: be346b5265f1410d
 worktree_dirty: false  # src/config/launch 下是否存在未提交改动（校验器会交叉核对）
 generated_by: dsh + docs/tools
 generated_at: 2026-10-02T00:00:00Z
@@ -140,15 +140,18 @@ python3 docs/tools/verify_docs.py --root . --module <module> \
 | 层 | 检查 ID | 判据 |
 |---|---|---|
 | L1 存在性 | `anchor.file_missing` `anchor.line_out_of_range` | 锚点文件存在、行号在范围内 |
+| L1 存在性 | `anchor.range_invalid` | 区间锚点不得倒置（`开始 ≤ 结束`） |
 | L1 存在性 | `anchor.unsupported` | 锚点附近真的出现该行引用的符号 |
 | L1 存在性 | `symbol.unknown` | 反引号里的 `::` 符号存在于 inventory |
 | L2 一致性 | `ros2.unknown_topic` `ros2.unknown_type` | 话题名/消息类型是**解析后**的真值 |
 | L2 一致性 | `param.value_mismatch` `param.unknown_key` | 参数值等于 YAML 真值，键路径存在 |
 | L2 一致性 | `claim.unverified_test` | 无测试仓库禁止出现「已验证」类断言 |
 | L3 覆盖率 | `coverage.missing_file` | 模块每个源文件都被文档提及 |
-| L3 覆盖率 | `structure.missing_doc` `structure.front_matter` | 9 个文件齐全、front-matter 完整 |
+| L3 覆盖率 | `structure.missing_doc` `structure.front_matter` `structure.doc_mismatch` | 9 个文件齐全；front-matter 完整（含 `generated_by`/`generated_at`）；`doc` 与文件名一致 |
 | 结构 | `annotation.unsupported_section` `structure.mermaid` | 每节有锚点或标注、Mermaid 首行合法 |
-| 时效 | `evidence.stale` `review.pending` | 证据摘要/git_rev 未过期、reviewer 已填 |
+| 时效 | `evidence.stale` | 证据摘要/git_rev 与当前不一致 |
+| 时效（WARN） | `evidence.rev_drift` `anchor.worktree_drift` | 证据包**自身**记录的 revision 与文档声明不符；或锚点引用的文件在当前工作区有未提交改动（行号可能已位移，勿按工作区改文档） |
+| 人工审核闸门 | `review.pending` `review.bypass` | 未审核 → WARN；`status: reviewed` 但 `reviewer` 是占位值（含 `未审核`）→ **ERROR**，堵住自我认证 |
 
 ### 4.1 校验器**做不到**什么
 
@@ -200,11 +203,18 @@ python3 docs/tools/verify_docs.py --root . --module <module> \
 
 ```
 status = NEEDS_FIX，errors = 0，warnings = 每篇一条 review.pending
+（另可能有 evidence.rev_drift / anchor.worktree_drift 两类时效告警；
+ 它们是**环境提示**而非文档缺陷，见 §4）
 ```
 
 这不是失败，而是**设计要求**：机器可验证的部分已经全部通过，剩下的是
 `docs/nav/AGENTS.md` 要求的「人工审核闭环」。人工确认后填写 `reviewer`
 与 `status: reviewed`，才可能得到 `PASS`。
+
+**闸门的强制方式（2026-10-03 加固）**：`status: reviewed` 与 `reviewer` 必须
+**同时**为真值。若 `status` 已改为 `reviewed` 而 `reviewer` 仍是占位值
+（`未审核` / `待审核` / `待填` / `TODO` / `unknown` / 空），校验器直接判
+`review.bypass`（**ERROR → FAIL**），因此「只把 status 改成 reviewed」拿不到 PASS。
 
 ---
 
@@ -280,6 +290,7 @@ cmake --build docs/tools/cpp/inventory/build -j
 | `symbol.unknown` 只查**本模块** inventory | 引用 utils / planner 等跨模块符号时，限定名会误报 | 跨模块符号不要用反引号限定名，改用「文件锚点」表述 |
 | `subnode_reads` 未做跨函数调用点推导 | 形如 `node["key"]` 的读取无法确定绝对键路径 | 必须在 `待确认清单.md` 中如实列为缺口语义，不得猜 |
 | 校验器无法判断语义对错 | 符号全对但结论错抓不到 | 由独立审核 Agent + 人工审核补位（§4.1） |
+| 0 字节源文件（如纯头文件库的空 `.cpp`） | 覆盖率要求每个源文件都作为锚点出现，而锚点要求 `1 ≤ 行号 ≤ 文件行数`（空文件为 0 行），两者冲突 | 校验器已允许对「存在但 0 行」的文件使用 `:1` 锚点（`verify_docs.py` 的行号检查用 `max(total, 1)`）；同时建议给空文件补一行说明注释，便于人读 |
 
 ---
 

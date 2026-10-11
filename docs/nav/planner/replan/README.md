@@ -1,9 +1,9 @@
 ---
 module: replan
 doc: README
-git_rev: 2eed7d3e884d
-evidence_digest: 7c453c4e8af72579
-worktree_dirty: true
+git_rev: 8f98daee5bc7
+evidence_digest: be346b5265f1410d
+worktree_dirty: false
 generated_by: dsh + docs/tools（clangd documentSymbol / python extractors）
 generated_at: 2026-10-02T05:00:00Z
 status: draft
@@ -30,7 +30,7 @@ reviewer: 未审核
 本模块是 planner 链路的**编排层**：门面类 `replan::FsmReplan`
 （`src/planner/replan/include/replan/fsm_replanner.h:19`）
 持有 `path_planning` 门面与 MINCO 优化器（`src/planner/replan/include/replan/fsm_replanner.h:97-98`），
-对外只暴露一个入口 `plan`（`src/planner/replan/include/replan/fsm_replanner.h:83`）。
+对外暴露两个入口：唯一**生效**的入口是 `plan`（`src/planner/replan/include/replan/fsm_replanner.h:83`）；`one_plan` 也是 public（`src/planner/replan/include/replan/fsm_replanner.h:90`）但没有调用点。
 
 每次调用按三类条件决定是否重规划：
 

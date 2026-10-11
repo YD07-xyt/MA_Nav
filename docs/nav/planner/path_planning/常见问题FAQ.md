@@ -1,9 +1,9 @@
 ---
 module: path_planning
 doc: 常见问题FAQ
-git_rev: 2eed7d3e884d
-evidence_digest: 7c453c4e8af72579
-worktree_dirty: true
+git_rev: 8f98daee5bc7
+evidence_digest: be346b5265f1410d
+worktree_dirty: false
 generated_by: dsh + docs/tools（clangd documentSymbol / python extractors）
 generated_at: 2026-10-02T02:00:00Z
 status: draft
@@ -56,7 +56,7 @@ reviewer: 未审核
 
 | # | 原因 | 证据 |
 |---|---|---|
-| 1 | 起点或终点落在膨胀区内（图内） | `src/planner/path_planning/src/search/astar.cpp:19-26` |
+| 1 | 起点或终点落在膨胀区内（图内） | `src/planner/path_planning/src/search/jps.cpp:202-209`（A* 分支对应 `src/planner/path_planning/src/search/astar.cpp:19-26`） |
 | 2 | 搜索超时（调用方给 5000 ms） | `src/planner/path_planning/src/search/astar.cpp:43-48` |
 | 3 | 搜索耗尽开放集，无路径 | `src/planner/path_planning/src/search/astar.cpp:89` |
 | 4 | JPS 起点 1.5 m 内没有可通行栅格 | `src/planner/path_planning/src/search/jps.cpp:226-231` |

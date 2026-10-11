@@ -1,9 +1,9 @@
 ---
 module: map
 doc: README
-git_rev: 2eed7d3e884d
-evidence_digest: 7c453c4e8af72579
-worktree_dirty: true
+git_rev: 8f98daee5bc7
+evidence_digest: be346b5265f1410d
+worktree_dirty: false
 generated_by: dsh + docs/tools（clangd documentSymbol / clang AST / python extractors）
 generated_at: 2026-10-02T00:30:00Z
 status: draft
@@ -61,10 +61,10 @@ reviewer: 未审核
 |---|---|---|
 | ros2 层 | `src/ros2/src/ros2_node.cpp:33` | 构造 `ma_map::MaMap`，传入 map.yaml 路径 |
 | ros2 层 | `src/map/include/map/ma_map.hpp:99` | `update_odom` 更新机器人位姿 |
-| ros2 层 | `src/map/include/map/ma_map.hpp:102` | `update_cloud` 缓存点云 |
-| ros2 层 | `src/map/include/map/ma_map.hpp:50` | `update_map` 触发一次地图更新 |
-| planner | `src/map/include/map/ma_map.hpp:130` | `get_rog_map` 取 3D 地图做查询 |
-| planner | `src/map/include/map/ma_map.hpp:124` | `get_grid_map` 取 2D 栅格做搜索 |
+| ros2 层 | `src/map/include/map/ma_map.hpp:102` | `update_cloud` 缓存点云（调用点 `src/ros2/src/ros2_node.cpp:427`） |
+| ros2 层 | `src/map/include/map/ma_map.hpp:50` | `update_map` 触发一次地图更新（调用点 `src/ros2/src/ros2_node.cpp:432`） |
+| （无调用者） | `src/map/include/map/ma_map.hpp:130` | `get_rog_map`：唯一调用点是可视化头（`src/ros2/include/ros2/misc/visualizer.hpp:1309`），planner 不引用 |
+| ros2 层 | `src/map/include/map/ma_map.hpp:124` | `get_grid_map`：调用点都在节点实现（如 `src/ros2/src/ros2_node.cpp:434`），并把栅格作为实参交给重规划 |
 
 ## 源文件清单
 

@@ -47,7 +47,15 @@ REQUIRED_DOCS = [
     "待确认清单.md",
 ]
 FRONT_MATTER_REQUIRED = ["module", "doc", "git_rev", "evidence_digest",
-                        "worktree_dirty", "status", "reviewer"]
+                        "worktree_dirty", "generated_by", "generated_at",
+                        "status", "reviewer"]
+# reviewer 的占位值：出现这些值即表示人工审核尚未真正完成
+REVIEWER_PLACEHOLDERS = {"", "TODO", "待填", "unknown", "未审核", "待审核"}
+# worktree_dirty 的探测范围（契约 §2.1 定义为 src/config/launch）。
+# 若要把「任何 CMakeLists.txt」也纳入（会让全部文档随构建配置变化翻转），
+# 在列表末尾追加 "*CMakeLists.txt" 即可；当前改用 anchor.worktree_drift 精确告警，
+# 只标记真正引用了脏文件的锚点。
+WORKTREE_DIRTY_PATHS = ["src", "config", "launch"]
 
 # 外部命名空间：这些 `::` 符号不属于被文档化的仓库，不参与符号存在性检查
 EXTERNAL_NAMESPACES = {
@@ -113,7 +121,7 @@ def worktree_dirty(root: pathlib.Path):
     """只读探测被文档化源码是否有未提交改动（AGENTS.md 允许 git status）。"""
     try:
         proc = subprocess.run(
-            ["git", "status", "--porcelain", "--", "src", "config", "launch"],
+            ["git", "status", "--porcelain", "--", *WORKTREE_DIRTY_PATHS],
             cwd=str(root), capture_output=True, text=True, timeout=30)
     except Exception:
         return None, []
@@ -121,6 +129,43 @@ def worktree_dirty(root: pathlib.Path):
         return None, []
     files = [line[3:].strip() for line in proc.stdout.splitlines() if line.strip()]
     return bool(files), files
+
+
+def worktree_changed(root: pathlib.Path) -> set:
+    """全仓库未提交改动（排除 docs/：文档自身就是产物）。"""
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(root), capture_output=True, text=True, timeout=30)
+    except Exception:
+        return set()
+    if proc.returncode != 0:
+        return set()
+    out: set = set()
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:].strip().strip('"')
+        if path == "docs" or path.startswith("docs/"):
+            continue
+        out.add(path)
+    return out
+
+
+def evidence_revs(root: pathlib.Path, ev_root: pathlib.Path) -> dict:
+    """证据包内各 JSON 自带的 git_rev → 文件列表。"""
+    revs: dict = {}
+    for p in sorted(ev_root.rglob("*.json")):
+        if p.name.startswith("verify."):
+            continue
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        rev = data.get("git_rev")
+        if rev:
+            revs.setdefault(str(rev), []).append(str(p.relative_to(root)))
+    return revs
 
 
 def strip_fences(lines: list[str]) -> list[bool]:
@@ -242,7 +287,18 @@ def main() -> int:
     evidence_digest = ec.evidence_digest(str(ev_root))
     current_rev = ec.git_rev(str(root))
     dirty, dirty_files = worktree_dirty(root)
+    changed_files = worktree_changed(root)
+    drifted_anchors: dict = {}
     all_mentioned_files: set[str] = set()
+
+    # 证据包自身记录的 revision 与文档声明不一致时告警：摘要只覆盖证据文件、
+    # 不覆盖源码，因此源码漂移无法由 evidence_digest 发现。
+    for rev, rev_files in sorted(evidence_revs(root, ev_root).items()):
+        if rev != current_rev:
+            rep.warn("evidence.rev_drift", "-", None,
+                     f"证据包中 {len(rev_files)} 个文件生成于 {rev}，"
+                     f"与文档声明的 git_rev {current_rev} 不同（例如 {rev_files[0]}）；"
+                     "evidence_digest 不含源码内容，源码是否漂移需另行核对")
 
     for md in md_files:
         text = md.read_text(encoding="utf-8", errors="replace")
@@ -277,12 +333,18 @@ def main() -> int:
                               f"front-matter 声明 worktree_dirty={claimed}，"
                               f"但 src/config/launch 下实际未提交改动为 {dirty}"
                               f"（{len(dirty_files)} 个文件）")
+            if fm.get("doc") not in (None, md.stem):
+                rep.error("structure.doc_mismatch", rel_doc, 1,
+                          f"front-matter doc={fm.get('doc')} 与文件名 {md.stem} 不符")
             reviewer = str(fm.get("reviewer", ""))
-            if reviewer.strip() in ("", "TODO", "待填", "unknown"):
-                rep.warn("review.pending", rel_doc, 1, "reviewer 未填写")
-            # status=draft 即「尚未人工审核」。这条闸门不允许 AI 自行绕过：
-            # 只有人工确认后才把 status 改为 reviewed。
-            if str(fm.get("status", "")).strip() != "reviewed":
+            reviewed = str(fm.get("status", "")).strip() == "reviewed"
+            if reviewed and reviewer.strip() in REVIEWER_PLACEHOLDERS:
+                # 「人工审核闸门」的旁路：status 已改为 reviewed，但 reviewer 仍是
+                # 占位值（如 未审核），说明没有真人签核，不得据此判定 PASS。
+                rep.error("review.bypass", rel_doc, 1,
+                          f"status=reviewed 但 reviewer={reviewer.strip() or '(空)'} "
+                          "是占位值；人工审核未真正完成")
+            elif not reviewed:
                 rep.warn("review.pending", rel_doc, 1,
                          f"status={fm.get('status')}，尚未通过人工审核；"
                          "人工确认后改为 reviewed")
@@ -302,9 +364,17 @@ def main() -> int:
                               f"锚点文件不存在：{path}", anchor=path)
                     continue
                 all_mentioned_files.add(path)
+                if path in changed_files:
+                    drifted_anchors.setdefault(path, set()).add(rel_doc)
+                if end and int(end) < start:
+                    rep.error("anchor.range_invalid", rel_doc, idx + 1,
+                              f"锚点区间倒置：{path}:{start}-{end}",
+                              anchor=f"{path}:{start}")
+                    continue
                 total = sum(1 for _ in target.open(encoding="utf-8", errors="replace"))
                 last = int(end) if end else start
-                if start < 1 or last > total:
+                # 0 字节文件（如纯头文件库的空 .cpp）没有行号可指，只允许 :1
+                if start < 1 or last > max(total, 1):
                     rep.error("anchor.line_out_of_range", rel_doc, idx + 1,
                               f"锚点行号越界：{path}:{start}"
                               f"{'-' + end if end else ''}（文件共 {total} 行）",
@@ -420,6 +490,13 @@ def main() -> int:
                 section_start = idx
         if section_start is not None:
             check_section(lines, section_start, len(lines), in_fence, rel_doc, rep)
+
+    # ---- 锚点引用的文件在当前工作区有未提交改动：行号可能已位移
+    for path, docs in sorted(drifted_anchors.items()):
+        rep.warn("anchor.worktree_drift", "-", None,
+                 f"锚点引用的 {path} 在当前工作区有未提交改动"
+                 f"（{len(docs)} 篇文档受影响）；契约行号相对声明的 git_rev，"
+                 "工作区副本可能已位移，勿按工作区行号改文档")
 
     # ---- L3 覆盖率：模块每个源文件都必须在文档里被提到
     missing = sorted(f for f in module_files if f not in all_mentioned_files)

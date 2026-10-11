@@ -1,9 +1,9 @@
 ---
 module: controller
 doc: README
-git_rev: 2eed7d3e884d
-evidence_digest: 7c453c4e8af72579
-worktree_dirty: true
+git_rev: 8f98daee5bc7
+evidence_digest: be346b5265f1410d
+worktree_dirty: false
 generated_by: dsh + docs/tools（clangd documentSymbol / python extractors）
 generated_at: 2026-10-02T04:00:00Z
 status: draft
@@ -23,7 +23,7 @@ reviewer: 未审核
 | 项目 | MA_Nav —— RM 哨兵类比赛用的导航栈（ROS 2 + C++20） |
 | 技术栈 | C++20 模板、Eigen（稀疏矩阵）、OSQP（经 OsqpEigen 封装）、spdlog |
 | 模块 | CMake 库 target `controller`（`src/planner/controller/CMakeLists.txt:3`） |
-| 职责 | 把上游优化好的轨迹追踪成底盘指令：4 状态（x, y, vx, vy）线性 MPC，每帧解一次 QP，输出加速度指令 (ax, ay) |
+| 职责 | 把上游优化好的轨迹追踪成控制量：4 状态（x, y, vx, vy）线性 MPC，每帧解一次 QP，输出加速度控制量 (ax, ay)。注意：调用方当前不使用该控制量，而是用预测状态第 1 步的速度分量组装底盘速度指令（见 常见问题FAQ 与 测试要点；本次审核已核实） |
 
 ## 【模块概述】
 

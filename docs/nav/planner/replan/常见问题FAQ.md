@@ -1,9 +1,9 @@
 ---
 module: replan
 doc: 常见问题FAQ
-git_rev: 2eed7d3e884d
-evidence_digest: 7c453c4e8af72579
-worktree_dirty: true
+git_rev: 8f98daee5bc7
+evidence_digest: be346b5265f1410d
+worktree_dirty: false
 generated_by: dsh + docs/tools（clangd documentSymbol / python extractors）
 generated_at: 2026-10-02T05:00:00Z
 status: draft
@@ -16,7 +16,7 @@ reviewer: 未审核
 
 ## Q1：目标变了却一直没有重规划，是怎么判定的？
 
-**原因**：只有三类条件之一成立才会重规划：目标相对**上次成功规划的目标**
+**原因**：三类条件之一成立时会重规划；此外「需要重规划」标志的初值为真、规划失败后也不清（只有成功收尾才清），因此标志残留时同样会进入重规划：目标相对**上次成功规划的目标**
 在任一轴上超过阈值、上一轮轨迹被判碰撞（或为空）、
 机器人相对参考折线的横向偏差超阈值
 （`src/planner/replan/src/fsm_replanner.cpp:35-56`）。
@@ -106,7 +106,7 @@ reviewer: 未审核
 若折线点数少于 2，直接返回最大浮点值，等价于「必然触发重规划」
 （`src/planner/replan/src/fsm_replanner.cpp:159-161`）。
 
-**处理**：参考折线优先取上次优化路径，缺省时取结果里的优化路径
+**处理**：参考折线**恒取结果里的优化路径**（`last_opt_path_` 从未被赋值，所谓「优先用上次优化路径」的分支实际不可达）
 （`src/planner/replan/src/fsm_replanner.cpp:51`）。
 
 ## 参数类问题

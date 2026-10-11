@@ -342,4 +342,4 @@ FsmReplan::plan / one_plan
    `docs/tools/test_injection.py --root .` → **PASS**（其前置条件「map 原文档 errors=0」恢复成立）。
 
 至此 **5 个模块**（map / path_planning / traj_optimize / controller / replan）的
-**45 篇文档共用同一份证据摘要 `7c453c4e8af72579`**。
+**45 篇文档共用同一份证据摘要 `7c453c4e8af72579`**（此为当时的基线；**最新基线见 `20261002_module_doc_anti_hallucination_pipeline.md`：7 个模块 / 63 篇 / `be346b5265f1410d` / `worktree_dirty: false`**）。

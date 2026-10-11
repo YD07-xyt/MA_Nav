@@ -1,9 +1,9 @@
 ---
 module: traj_optimize
 doc: README
-git_rev: 2eed7d3e884d
-evidence_digest: 7c453c4e8af72579
-worktree_dirty: true
+git_rev: 8f98daee5bc7
+evidence_digest: be346b5265f1410d
+worktree_dirty: false
 generated_by: dsh + docs/tools（clangd documentSymbol / python extractors）
 generated_at: 2026-10-02T03:00:00Z
 status: draft
@@ -49,7 +49,7 @@ L-BFGS（`src/planner/traj_optimize/include/traj_optimize/ma_spline_opt/traj_opt
 【事实】模块内**同时存在两套同名样条实现**，且模块自带的 `opt.md` 已给出取舍：
 `ma_spline_opt` 是目前主要的代码，`spline_opt` 是后续更新用的代码，
 `gcopter` 是 Minco 原实现、未使用
-（`src/planner/traj_optimize/include/traj_optimize/opt.md:1-4`）。
+（`src/planner/traj_optimize/include/traj_optimize/opt.md:1-5`）。
 本轮文档把 `spline_opt/**` 与 `gcopter/{minco,lbfgs,sdlp}.hpp` 明确列为**停用副本**
 （见 [依赖关系](./依赖关系.md) 与 [待确认清单](./待确认清单.md)）。
 
@@ -77,8 +77,8 @@ L-BFGS（`src/planner/traj_optimize/include/traj_optimize/ma_spline_opt/traj_opt
 
 ## 源文件清单
 
-17 个文件全部列出；「状态」列依据模块自带说明
-（`src/planner/traj_optimize/include/traj_optimize/opt.md:1-4`）与全仓库 include 检索。
+17 个源文件全部列出（表格含 `CMakeLists.txt` 共 18 行）；另有 4 个模块内 .md 旁注（`opt.md`、`problem.md`、`SplineOptimizerProtocols.md`、`SplineOptimizerProtocols_zh.md`，其中英文版全仓库零引用）；「状态」列依据模块自带说明
+（`src/planner/traj_optimize/include/traj_optimize/opt.md:1-5`）与全仓库 include 检索。
 
 | 文件 | 状态 | 职责 |
 |---|---|---|
@@ -96,7 +96,7 @@ L-BFGS（`src/planner/traj_optimize/include/traj_optimize/ma_spline_opt/traj_opt
 | `src/planner/traj_optimize/include/traj_optimize/spline_opt/SplineTrajectory/SplineOptimizer.hpp` | **停用** | spline_opt 平行副本的优化器框架，`src/planner/traj_optimize/include/traj_optimize/spline_opt/SplineTrajectory/SplineOptimizer.hpp:1` |
 | `src/planner/traj_optimize/include/traj_optimize/spline_opt/SplineTrajectory/SplineConvexHull.hpp` | **停用** | spline_opt 的凸包约束实现，`src/planner/traj_optimize/include/traj_optimize/spline_opt/SplineTrajectory/SplineConvexHull.hpp:1` |
 | `src/planner/traj_optimize/include/traj_optimize/spline_opt/tarj_opt.h` | **停用** | 8 行空壳类声明（构造函数无定义），`src/planner/traj_optimize/include/traj_optimize/spline_opt/tarj_opt.h:4` |
-| `src/planner/traj_optimize/include/traj_optimize/gcopter/minco.hpp` | **停用** | Minco S3/S4 原实现，`src/planner/traj_optimize/include/traj_optimize/gcopter/minco.hpp:43` |
+| `src/planner/traj_optimize/include/traj_optimize/gcopter/minco.hpp` | **停用** | MINCO 原实现（S4 在 `:202`、S3 在 `:751`），`src/planner/traj_optimize/include/traj_optimize/gcopter/minco.hpp:202` |
 | `src/planner/traj_optimize/include/traj_optimize/gcopter/lbfgs.hpp` | **停用** | Minco 自带的 L-BFGS 副本（实际用的是 utils 版本），`src/planner/traj_optimize/include/traj_optimize/gcopter/lbfgs.hpp:1` |
 | `src/planner/traj_optimize/include/traj_optimize/gcopter/sdlp.hpp` | **停用** | SDLP 线性规划求解器（供 Minco 使用），`src/planner/traj_optimize/include/traj_optimize/gcopter/sdlp.hpp:1` |
 | `src/planner/traj_optimize/CMakeLists.txt` | 生效 | 库 target、include 与链接，`src/planner/traj_optimize/CMakeLists.txt:7` |

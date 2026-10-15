@@ -153,6 +153,9 @@ private:
 
 public:
     explicit GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params_path);
+    inline auto get_num_threads()->int{
+        return config.num_threads;
+    }
     void map_callback(const sensor_msgs::msg::PointCloud2::SharedPtr& msg);
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr& msg);
     void target_callback(const geometry_msgs::msg::PoseStamped::SharedPtr& msg);

@@ -300,7 +300,7 @@ struct Config {
     std::string cmd_vel_name;
     std::string save_global_map_path;
     std::string save_map_srv_topic;
-
+    int num_threads;
     // 点击隧道区域
     std::string tunnel_regions_path;
     std::string save_tunnel_regions_srv_topic;
@@ -317,6 +317,7 @@ struct Config {
         YAML::Node config = YAML::LoadFile(params_path);
 
         if (config["ros2"]) {
+            num_threads=config["ros2"]["num_threads"].as<int>();
             map_topic_name = config["ros2"]["map_topic_name"].as<std::string>();
             target_topic_name = config["ros2"]["target_topic_name"].as<std::string>();
             clickedPoint_topic_name = config["ros2"]["clickedPoint_topic_name"].as<std::string>();

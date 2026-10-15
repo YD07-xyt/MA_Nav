@@ -1,5 +1,6 @@
 # ==================== ROS2 话题 / 路径配置 ====================
 ros2:
+  num_threads: 8
   map_topic_name: "/lio/cloud_world"          # 点云地图话题，用于实时建图/更新
   target_topic_name: "/goal_pose"             # 目标点话题，rviz 下发目标
   clickedPoint_topic_name: "/clicked_point"   # rviz 点选话题，用于画区域等
@@ -31,7 +32,7 @@ planner_config:
     traj_cut_length: 10        # 轨迹截断长度阈值 (m)，超过则标记需要截断
     distance_weight: 1.0       # 路径长度权重，用于梯形速度规划的加权长度计算
     yaw_weight: 0.5            # 航向变化权重，转弯越多加权长度越大、速度越慢
-    dense_sample_resolution: 0.1   # 高密度采样间距
+    dense_sample_resolution: 0.05   # 高密度采样间距
     rotation_penalty_weight: 1.0   # 转弯惩罚权重
 
     # ---------- 云台折叠参数 ----------

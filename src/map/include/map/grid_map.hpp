@@ -161,6 +161,7 @@ protected:
     }
     auto inflateOccupancy(const RowMatrixXi& occ, double inflate_radius, double resolution) -> RowMatrixXi;
     auto updateESDF() -> void;
+    auto sampleEsdf(const Eigen::Vector2d& pos, double& distance, Eigen::Vector2d* gradient) const -> bool;
 
 private:
     template<typename F_get_val, typename F_set_val>

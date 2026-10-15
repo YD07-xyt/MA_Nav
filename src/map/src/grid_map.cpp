@@ -57,76 +57,86 @@ auto GridMap::setMap(const RowMatrixXi& map) -> void {
     }
 }
 
-auto GridMap::getDistance(const Eigen::Vector2d& pos) const -> double {
-    if (!isInMap(pos)) return std::numeric_limits<double>::max();
+auto GridMap::sampleEsdf(const Eigen::Vector2d& pos, double& distance, Eigen::Vector2d* gradient) const -> bool {
+    if (!isInMap(pos)) return false;
 
-    Eigen::Vector2d pos_m = pos;
-    pos_m(0) -= 0.5 * resolution_;
-    pos_m(1) -= 0.5 * resolution_;
-
+    const Eigen::Vector2d local = (pos - map_origin_) * resolution_inv_;
+    const Eigen::Vector2i center(static_cast<int>(std::lround(local.x() - 0.5)), static_cast<int>(std::lround(local.y() - 0.5)));
+    // 二次拟合以最近格心为 0。双线性仍用该格心西南角，分数坐标落在 [0,1]。
+    const double tx = local.x() - 0.5 - center.x();
+    const double ty = local.y() - 0.5 - center.y();
+    // 双线性的 2×2 角点仍是原实现的采样格，不随最近格心移动。
+    Eigen::Vector2d pos_m = pos - 0.5 * resolution_ * Eigen::Vector2d::Ones();
     Eigen::Vector2i idx;
     posToIndex(pos_m, idx);
-
     Eigen::Vector2d idx_pos;
     indexToPos(idx, idx_pos);
+    const double fx = (pos.x() - idx_pos.x()) * resolution_inv_;
+    const double fy = (pos.y() - idx_pos.y()) * resolution_inv_;
 
-    Eigen::Vector2d diff = pos - idx_pos;
-    diff(0) *= resolution_inv_;
-    diff(1) *= resolution_inv_;
-
-    double values[2][2];
-    for (int x = 0; x < 2; x++) {
-        for (int y = 0; y < 2; y++) {
-            Eigen::Vector2i current_idx = idx + Eigen::Vector2i(x, y);
-            boundIndex(current_idx);
-            values[x][y] = esdf_buffer_[toAddress(current_idx)];
+    auto sampleBilinear = [&]() {
+        double values[2][2];
+        for (int x = 0; x < 2; ++x) {
+            for (int y = 0; y < 2; ++y) {
+                Eigen::Vector2i current_idx = idx + Eigen::Vector2i(x, y);
+                boundIndex(current_idx);
+                values[x][y] = esdf_buffer_[toAddress(current_idx)];
+            }
         }
+        const double v0 = values[0][0] * (1.0 - fx) + values[1][0] * fx;
+        const double v1 = values[0][1] * (1.0 - fx) + values[1][1] * fx;
+        distance = v0 * (1.0 - fy) + v1 * fy;
+        if (gradient) {
+            (*gradient)(1) = (v1 - v0) * resolution_inv_;
+            (*gradient)(0) =
+                ((1.0 - fy) * (values[1][0] - values[0][0]) + fy * (values[1][1] - values[0][1])) * resolution_inv_;
+        }
+    };
+
+    // 3x3 需要中心格四周各一格；贴边时邻域不完整，退回双线性。
+    if (center.x() < 1 || center.y() < 1 || center.x() + 1 >= voxel_num_.x() || center.y() + 1 >= voxel_num_.y()) {
+        sampleBilinear();
+        return true;
     }
 
-    double v0 = values[0][0] * (1 - diff[0]) + values[1][0] * diff[0];
-    double v1 = values[0][1] * (1 - diff[0]) + values[1][1] * diff[0];
-    return v0 * (1 - diff[1]) + v1 * diff[1];
+    const double wx[3] = {0.5 * tx * (tx - 1.0), 1.0 - tx * tx, 0.5 * tx * (tx + 1.0)};
+    const double wy[3] = {0.5 * ty * (ty - 1.0), 1.0 - ty * ty, 0.5 * ty * (ty + 1.0)};
+    const double dwx[3] = {tx - 0.5, -2.0 * tx, tx + 0.5};
+    const double dwy[3] = {ty - 0.5, -2.0 * ty, ty + 0.5};
+
+    distance = 0.0;
+    double ddx = 0.0;
+    double ddy = 0.0;
+    for (int dy = 0; dy < 3; ++dy) {
+        for (int dx = 0; dx < 3; ++dx) {
+            const double d = esdf_buffer_[toAddress(center + Eigen::Vector2i(dx - 1, dy - 1))];
+            distance += wx[dx] * wy[dy] * d;
+            if (gradient) {
+                ddx += dwx[dx] * wy[dy] * d;
+                ddy += wx[dx] * dwy[dy] * d;
+            }
+        }
+    }
+    if (gradient) {
+        gradient->x() = ddx * resolution_inv_;
+        gradient->y() = ddy * resolution_inv_;
+    }
+    return true;
+}
+
+auto GridMap::getDistance(const Eigen::Vector2d& pos) const -> double {
+    double distance = 0.0;
+    if (!sampleEsdf(pos, distance, nullptr)) return std::numeric_limits<double>::max();
+    return distance;
 }
 
 auto GridMap::getDistanceAndGradient(const Eigen::Vector2d& pos, double& distance, Eigen::Vector2d& gradient) const
     -> bool {
-    if (!isInMap(pos)) {
+    if (!sampleEsdf(pos, distance, &gradient)) {
         distance = std::numeric_limits<double>::max();
         gradient.setZero();
         return false;
     }
-
-    Eigen::Vector2d pos_m = pos;
-    pos_m(0) -= 0.5 * resolution_;
-    pos_m(1) -= 0.5 * resolution_;
-
-    Eigen::Vector2i idx;
-    posToIndex(pos_m, idx);
-
-    Eigen::Vector2d idx_pos;
-    indexToPos(idx, idx_pos);
-
-    Eigen::Vector2d diff = pos - idx_pos;
-    diff(0) *= resolution_inv_;
-    diff(1) *= resolution_inv_;
-
-    double values[2][2];
-    for (int x = 0; x < 2; x++) {
-        for (int y = 0; y < 2; y++) {
-            Eigen::Vector2i current_idx = idx + Eigen::Vector2i(x, y);
-            boundIndex(current_idx);
-            values[x][y] = esdf_buffer_[toAddress(current_idx)];
-        }
-    }
-
-    double v0 = values[0][0] * (1 - diff[0]) + values[1][0] * diff[0];
-    double v1 = values[0][1] * (1 - diff[0]) + values[1][1] * diff[0];
-    distance = v0 * (1 - diff[1]) + v1 * diff[1];
-
-    gradient(1) = (v1 - v0) * resolution_inv_;
-    gradient(0) = (1 - diff[1]) * (values[1][0] - values[0][0]) + diff[1] * (values[1][1] - values[0][1]);
-    gradient(0) *= resolution_inv_;
-
     return true;
 }
 

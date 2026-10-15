@@ -60,7 +60,6 @@ public:
     void init(double map_size_x, double map_size_y, double resolution) {
         init(map_size_x / 2.0, map_size_x / 2.0, map_size_y / 2.0, map_size_y / 2.0, resolution);
     }
-    //TODO: 考虑地图中已有的障碍物点，不2次加入
     auto direct_set_map(const RowMatrixXi& map) -> void;
     void set_semantics();
     auto inflate(double radius) -> void;

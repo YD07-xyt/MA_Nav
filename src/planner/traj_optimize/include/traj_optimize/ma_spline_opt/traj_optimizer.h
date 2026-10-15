@@ -6,6 +6,7 @@
 #include "traj_optimize/esdf_Interface.hpp"
 #include "utils/expected.hpp"
 #include "utils/lbfgs.hpp"
+#include "utils/logger.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -70,6 +71,7 @@ private:
     auto optimize_2d_stage(
         const SplineTrajectory::SplineOptimizer<2>::ProblemDefinition& problem,
         const StageOptimizerConfig& stage,
+        bool split_esdf,
         Eigen::VectorXd& x,
         double& final_cost
     ) -> bool;
@@ -97,6 +99,7 @@ private:
     auto optimize_3d_stage(
         const SplineTrajectory::SplineOptimizer<3>::ProblemDefinition& problem,
         const StageOptimizerConfig& stage,
+        bool split_esdf,
         Eigen::VectorXd& x,
         double& final_cost
     ) -> bool;
@@ -232,15 +235,17 @@ auto MaSplineTrajectoryOptimizer<ESDF>::optimize_xy(const MaSplineInput& input) 
     Eigen::VectorXd x;
 
     double cost_stage1 = 0.0;
-    if (!optimize_2d_stage(problem, config_.stage1, x, cost_stage1)) {
+    if (!optimize_2d_stage(problem, config_.stage1, false, x, cost_stage1)) {
         logger::warn(logger::traj_opt, "lbfgs opt1 failed");
         return tl::make_unexpected(MaOptError::LBFGS_OPT_FAILED);
     }
 
+    const Eigen::VectorXd x_stage1 = x;
     double cost_stage2 = 0.0;
-    if (!optimize_2d_stage(problem, config_.stage2, x, cost_stage2)) {
-        logger::warn(logger::traj_opt, "lbfgs opt2 failed");
-        return tl::make_unexpected(MaOptError::LBFGS_OPT_FAILED);
+    if (!optimize_2d_stage(problem, config_.stage2, true, x, cost_stage2)) {
+        logger::warn(logger::traj_opt, "lbfgs opt2 failed, keep stage1");
+        x = x_stage1;
+        cost_stage2 = cost_stage1;
     }
 
     // 同步最终结果
@@ -263,6 +268,7 @@ template <typename ESDF>
 auto MaSplineTrajectoryOptimizer<ESDF>::optimize_2d_stage(
     const SplineTrajectory::SplineOptimizer<2>::ProblemDefinition& problem,
     const StageOptimizerConfig& stage,
+    bool split_esdf,
     Eigen::VectorXd& x,
     double& final_cost
 ) -> bool {
@@ -291,6 +297,7 @@ auto MaSplineTrajectoryOptimizer<ESDF>::optimize_2d_stage(
 
     RobotIntegralCost<2, ESDF> integral_cost1;
     integral_cost1.esdf = esdf_;
+    integral_cost1.split_esdf = split_esdf;
     integral_cost1.w_obs = stage.weight_obstacle;
     integral_cost1.safe_distance = config_.safe_distance;
     integral_cost1.w_vel = stage.weight_vel;
@@ -318,6 +325,9 @@ auto MaSplineTrajectoryOptimizer<ESDF>::optimize_2d_stage(
         &cb,
         params
     );
+    if(result<0){
+        logger::error(logger::traj_opt, "L-BFGS failed: {}",lbfgs::lbfgs_strerror(result));
+    }
     return result >= 0 && std::isfinite(final_cost) && x.allFinite();
 };
 
@@ -325,6 +335,7 @@ template <typename ESDF>
 auto MaSplineTrajectoryOptimizer<ESDF>::optimize_3d_stage(
     const SplineTrajectory::SplineOptimizer<3>::ProblemDefinition& problem,
     const StageOptimizerConfig& stage,
+    bool split_esdf,
     Eigen::VectorXd& x,
     double& final_cost
 ) -> bool {
@@ -353,6 +364,7 @@ auto MaSplineTrajectoryOptimizer<ESDF>::optimize_3d_stage(
     RobotIntegralCost<3, ESDF> integral_cost;
 
     integral_cost.esdf = esdf_;
+    integral_cost.split_esdf = split_esdf;
     integral_cost.w_obs = stage.weight_obstacle;
     integral_cost.safe_distance = config_.safe_distance;
 
@@ -458,13 +470,16 @@ auto MaSplineTrajectoryOptimizer<ESDF>::optimize_xy_yaw_joint(const MaSplineInpu
     Eigen::VectorXd x;
 
     double cost_stage1 = 0.0;
-    if (!optimize_3d_stage(problem, config_.stage1, x, cost_stage1)) {
+    if (!optimize_3d_stage(problem, config_.stage1, false, x, cost_stage1)) {
         return tl::make_unexpected(MaOptError::LBFGS_OPT_FAILED);
     }
 
+    const Eigen::VectorXd x_stage1 = x;
     double cost_stage2 = 0.0;
-    if (!optimize_3d_stage(problem, config_.stage2, x, cost_stage2)) {
-        return tl::make_unexpected(MaOptError::LBFGS_OPT_FAILED);
+    if (!optimize_3d_stage(problem, config_.stage2, true, x, cost_stage2)) {
+        logger::warn(logger::traj_opt, "lbfgs opt2 failed, keep stage1");
+        x = x_stage1;
+        cost_stage2 = cost_stage1;
     }
 
     auto status = optimizer_3d_.synchronizeWorkingState(ctx_3d_, x);

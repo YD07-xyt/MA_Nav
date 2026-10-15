@@ -342,7 +342,7 @@ auto JPS::jps_search(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, 
 
     // open set 耗尽 -> 无路径。记录足够的上下文以便诊断失败原因
     // (例如起点被 clamp 到地图边界且其邻居全部被占用)。
-    logger::planning->error(
+    logger::error(logger::planning,
         "JPS: no path! start=({:.3f},{:.3f}) goal=({:.3f},{:.3f}) root_cell=({},{}) goal_cell=({},{}) "
         "map={}x{} res={:.3f} snapped={} root_blocked={} n_blocked_neighbors={} expanded={}",
         start.x(), start.y(), goal.x(), goal.y(),

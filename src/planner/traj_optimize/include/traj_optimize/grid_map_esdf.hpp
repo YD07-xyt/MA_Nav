@@ -43,6 +43,10 @@ public:
         return map_->isInsideMap(Eigen::Vector2d(x, y));
     }
 
+    auto resolution() const -> double {
+        return map_->getResolution();
+    }
+
 private:
     std::shared_ptr<const grid_map::GridMap> map_;
 };

@@ -16,13 +16,7 @@ auto GridMap::init(double x_left, double x_right, double y_left, double y_right,
     semantics_buffer_.resize(buffer_size_, static_cast<uint8_t>(Semantics::NONE));
 }
 auto GridMap::direct_set_map(const RowMatrixXi& map) -> void {
-    if (!checkMapSize(map)) return;
-    for (int x = 0; x < voxel_num_.x(); ++x) {
-        for (int y = 0; y < voxel_num_.y(); ++y) {
-            occ_buffer_[toAddress(Eigen::Vector2i(x, y))] = map(x, y);
-        }
-    }
-    updateESDF();
+    setMap(map);
 }
 auto GridMap::inflate(double radius) -> void {
     const auto voxel_num = getVoxelNum();

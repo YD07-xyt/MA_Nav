@@ -156,11 +156,10 @@ void GlobalPlanner2d::controller_callback() {
         vy_world_state = last_vy_world_cmd_;
     } else {
         // 第一帧：用里程计速度，但限幅到合理范围，避免一开始就 infeasible
-        const double vx_body = current_pose->v.x();
-        const double vy_body = current_pose->v.y();
-
-        double vx_world_odom = c * vx_body - s * vy_body;
-        double vy_world_odom = s * vx_body + c * vy_body;
+        // Super-LIO /lio/base_odom 的 twist.linear 是世界系速度（ESKF 中 v 由 R*acc+g 积分），
+        // child_frame_id=base_link 只是标注，不需要再按 yaw 旋转。
+        const double vx_world_odom = current_pose->v.x();
+        const double vy_world_odom = current_pose->v.y();
 
         // 限幅到 MPC 速度约束内
         constexpr double kMaxVel = 3.0;

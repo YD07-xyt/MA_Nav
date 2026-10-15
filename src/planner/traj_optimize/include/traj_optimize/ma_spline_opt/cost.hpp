@@ -27,6 +27,9 @@ struct RobotIntegralCost
     double yaw_rate_max = 1.0;
     double yaw_acc_max = 2.0;
 
+    // false: stage1 使用完整 ESDF 梯度。true: stage2 去掉切向后再探测一步。
+    bool split_esdf = false;
+
     static inline void smoothedL1(double x, double &f, double &df)
     {
         constexpr double pe = 1e-2;
@@ -79,44 +82,65 @@ struct RobotIntegralCost
             {
                 double d = esdf->getDistance(pos.x(), pos.y());
                 double violation = safe_distance - d;
-
-                double f, df;
-                smoothedL1(violation, f, df);
-
-                cost += w_obs * f;
-
                 Eigen::Vector2d grad_dist = esdf->getGradient(pos.x(), pos.y());
 
-                // ========== 参考 minco：正交投影 + 梯度增强 ==========
-                Eigen::Vector2d grad_orth = grad_dist;
-                Eigen::Vector2d vel = v.template head<2>();
-                double vel_norm = vel.norm();
-
-                constexpr double kMinNorm = 1e-6;
-                constexpr double kThreshold = 0.5;
-
-                if (vel_norm > kMinNorm)
+                if (!split_esdf)
                 {
-                    Eigen::Vector2d tangent = vel / vel_norm;
-                    grad_orth = grad_dist - grad_dist.dot(tangent) * tangent;
+                    double f, df;
+                    smoothedL1(violation, f, df);
+                    cost += w_obs * f;
+                    gp.template head<2>() += w_obs * df * (-1.0) * grad_dist;
                 }
-
-                double orth_norm = grad_orth.norm();
-
-                if (orth_norm < kThreshold && orth_norm > kMinNorm)
+                else if (violation > 0.0)
                 {
-                    grad_orth = grad_orth / orth_norm * std::sqrt(orth_norm);
-                }
-                else if (orth_norm <= kMinNorm)
-                {
-                    double raw_norm = grad_dist.norm();
-                    if (raw_norm > kMinNorm)
+                    // stage2：只在违反安全距离时介入。代价始终是真实违反量 safe - d，
+                    // 势谷判断只改梯度大小，不改代价，避免代价跳变和穿墙时惩罚被压小。
+                    // 去掉沿速度方向的分量，只保留横向推力。
+                    Eigen::Vector2d grad_pos = grad_dist;
+                    const Eigen::Vector2d vel = v.template head<2>();
+                    const double vel_norm = vel.norm();
+                    constexpr double kMinNorm = 1e-6;
+                    if (vel_norm > kMinNorm)
                     {
-                        grad_orth = grad_dist / raw_norm * kThreshold;
+                        const Eigen::Vector2d tangent = vel / vel_norm;
+                        grad_pos -= grad_dist.dot(tangent) * tangent;
                     }
-                }
 
-                gp.template head<2>() += w_obs * df * (-1.0) * grad_orth;
+                    const double orth_norm = grad_pos.norm();
+                    constexpr double kThreshold = 0.5;
+                    if (orth_norm > kMinNorm)
+                    {
+                        const Eigen::Vector2d direction = grad_pos / orth_norm;
+                        // 一步不超过一个栅格，差分才接近真实斜率。
+                        const double step = std::max(esdf->resolution(), 1e-3);
+                        const Eigen::Vector2d ahead = pos + direction * step;
+                        if (esdf->isInside(ahead.x(), ahead.y()))
+                        {
+                            const double d_ahead = esdf->getDistance(ahead.x(), ahead.y());
+                            const double step_grad = (d_ahead - d) / step;
+                            if (step_grad < kThreshold)
+                            {
+                                // 再走会进势谷：方向保持横向梯度，模长用 sqrt 增强，避免梯度消失。
+                                grad_pos = direction * std::sqrt(orth_norm);
+                            }
+                            else
+                            {
+                                // 这一步是自由的：只把梯度归一到 1。
+                                grad_pos = direction;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // 横向分量几乎为零：没有横向信息，退回完整 ESDF 梯度。
+                        grad_pos = grad_dist;
+                    }
+
+                    double f, df;
+                    smoothedL1(violation, f, df);
+                    cost += w_obs * f;
+                    gp.template head<2>() += w_obs * df * (-1.0) * grad_pos;
+                }
             }
 
             // ========== 速度约束 ==========

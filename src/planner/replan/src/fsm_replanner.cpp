@@ -63,12 +63,43 @@ auto FsmReplan::plan(
         Eigen::Vector2d goal(goal_pose.p.x(), goal_pose.p.y());
 
         // 若起点/终点过于靠近障碍物，沿 ESDF 梯度外推到安全点，保证可规划
+        const Eigen::Vector2d robot_pos = start;
         start = get_safe_pos(start, *grid_map, safe_threshold);
         goal = get_safe_pos(goal, *grid_map, safe_threshold);
+        const bool start_moved = (start - robot_pos).norm() > 1e-6;
 
         path_planning.set_use_jps(true);
 
-        const Eigen::Vector3d& current_vel = Eigen::Vector3d(current_pose.v.x(), current_pose.v.y(), current_pose.wz);
+        // 起点速度/加速度：默认冷启动（里程计速度，世界系；加速度 0）。
+        // 有上一条有效样条时热启动（同 navkit prepareHotStart）：取机器人在旧样条上
+        // 最近投影时刻的 v(t)、a(t)，避免把里程计瞬时速度当硬边界导致起点甩弧。
+        Eigen::Vector2d start_vel(current_pose.v.x(), current_pose.v.y());
+        Eigen::Vector2d start_acc = Eigen::Vector2d::Zero();
+        bool hot_start = false;
+        const auto& last_spline = result_.ma_spline_traj;
+        if (last_spline.success && last_spline.trajectory.isInitialized()) {
+            const double dur = last_spline.trajectory.getDuration();
+            const double t0 = last_spline.trajectory.getStartTime();
+            const auto& traj = last_spline.trajectory.getTrajectory();
+            const double res = std::max(planner_config_.replan_params.projection_search_resolution, 1e-3);
+            double best_t = 0.0;
+            double best_d = std::numeric_limits<double>::max();
+            for (double t = 0.0; t <= dur + 1e-9; t += res) {
+                const double d = (traj.evaluate(t0 + t, 0).head<2>() - robot_pos).squaredNorm();
+                if (d < best_d) {
+                    best_d = d;
+                    best_t = t;
+                }
+            }
+            // 投影时刻越界（在旧轨迹起点之前或已走完）时回退冷启动
+            if (best_t > 0.0 && best_t < dur) {
+                start_vel = traj.evaluate(t0 + best_t, 1).head<2>();
+                start_acc = traj.evaluate(t0 + best_t, 2).head<2>();
+                hot_start = true;
+            }
+        }
+
+        const Eigen::Vector3d current_vel(start_vel.x(), start_vel.y(), current_pose.wz);
         path_planning.set_velocity(current_vel, Eigen::Vector3d::Zero());
 
         auto trajectory = path_planning.path_planning(start, goal, current_pose.yaw, goal_pose.yaw, 5000);
@@ -92,8 +123,38 @@ auto FsmReplan::plan(
         minco_opt::GridMapESDF grid_map_esdf(grid_map);
         ma_opt_.set_esdf_interface(&grid_map_esdf);
         auto ma_intput = ma_spline_opt::from_path_planning_trajectory(trajectory.value());
-        
-        
+
+        // 新路径首段方向，用于热启动方向校验与起点挪开时的速度投影
+        Eigen::Vector2d first_dir = Eigen::Vector2d::Zero();
+        const auto& opt_path = result_.planning_traj.optimized_path;
+        if (opt_path.size() >= 2) {
+            const Eigen::Vector2d seg = opt_path[1] - opt_path[0];
+            if (seg.norm() > 1e-6) {
+                first_dir = seg.normalized();
+            }
+        }
+
+        // 热启动方向校验（同 navkit）：旧速度与新路径首段夹角 > 60° 时回退冷启动
+        if (hot_start && start_vel.norm() > 0.1 && first_dir.norm() > 0.5
+            && start_vel.normalized().dot(first_dir) < 0.5)
+        {
+            hot_start = false;
+            start_vel = Eigen::Vector2d(current_pose.v.x(), current_pose.v.y());
+            start_acc = Eigen::Vector2d::Zero();
+        }
+
+        // 起点被挪开：速度只保留沿新路径首段方向的分量（反向置 0），加速度置 0
+        if (start_moved) {
+            const double along = first_dir.norm() > 0.5 ? std::max(0.0, start_vel.dot(first_dir)) : 0.0;
+            start_vel = along * first_dir;
+            start_acc = Eigen::Vector2d::Zero();
+        }
+
+        ma_intput.start_vel = start_vel;
+        ma_intput.start_acc = start_acc;
+        logger::debug(logger::fsm_replan, "start state: hot={} moved={} v=({:.2f},{:.2f}) a=({:.2f},{:.2f})",
+            hot_start, start_moved, start_vel.x(), start_vel.y(), start_acc.x(), start_acc.y());
+
         ma_intput.model=ma_spline_opt::OptModel::OMNI_XY;
         
         

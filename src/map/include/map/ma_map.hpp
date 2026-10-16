@@ -5,6 +5,7 @@
 #include "map/terrain_analysis.hpp"
 #include "utils/logger.hpp"
 #include <memory>
+#include <mutex>
 #include <optional>
 namespace ma_map {
 class MaMap {
@@ -39,10 +40,20 @@ public:
         occupancy_2d = grid_map::RowMatrixXi::Zero(voxel_num.x(), voxel_num.y());
         global_2d_occ_=grid_map::RowMatrixXi::Zero(voxel_num.x(), voxel_num.y());
         dynamic_2d_occ_=grid_map::RowMatrixXi::Zero(voxel_num.x(), voxel_num.y());
+        publish_grid_map();
     }
     auto set_global_map(grid_map::RowMatrixXi global_map) -> void {
         global_2d_occ_ = global_map;
+        std::lock_guard<std::mutex> lock(back_mtx_);
         grid_map_ptr_->setMap(global_2d_occ_);
+        publish_grid_map();
+    }
+    // 语义标记写到后台缓冲并发布，避免被下一帧地图更新覆盖
+    auto set_semantics_polygon(const std::vector<Eigen::Vector2d>& polygon, grid_map::GridMap::Semantics semantics)
+        -> void {
+        std::lock_guard<std::mutex> lock(back_mtx_);
+        grid_map_ptr_->semantics_polygon_region(polygon, semantics);
+        publish_grid_map();
     }
     auto set_mapping_model(bool mapping_model) -> void {
         mapping_model_ = mapping_model;
@@ -82,19 +93,31 @@ public:
             dynamic_2d_occ_.setZero();
         }
 
+        // 按真实占地写入：terrain 点是 terrain 格（边长 cfg_.resolution）的中心，
+        // 该中心正好落在 2D 细格边界上，直接 posToIndex 截断会随浮点误差左右跳一格。
+        // 这里把整个 terrain 格覆盖到 2D 栅格：两端各向格内收 1/4 细格再取索引，避开边界截断。
+        const double terrain_half = 0.5 * cfg_.resolution;
+        const double eps = 0.25 * grid_map_ptr_->getResolution();
+        const Eigen::Vector2i max_idx(dynamic_2d_occ_.rows() - 1, dynamic_2d_occ_.cols() - 1);
         for(auto & i : terrain_map_){
-            Eigen::Vector2d obstacle_world = Eigen::Vector2d(i.x(), i.y());
-            Eigen::Vector2i grid_index;
-            grid_map_ptr_->posToIndex(obstacle_world, grid_index);
-            if (grid_index.x() >= 0 && grid_index.x() < dynamic_2d_occ_.rows() &&
-                grid_index.y() >= 0 && grid_index.y() < dynamic_2d_occ_.cols()) {
-                dynamic_2d_occ_(grid_index.x(), grid_index.y()) = 1; // 标记为障碍物
+            Eigen::Vector2i lo, hi;
+            grid_map_ptr_->posToIndex(Eigen::Vector2d(i.x() - terrain_half + eps, i.y() - terrain_half + eps), lo);
+            grid_map_ptr_->posToIndex(Eigen::Vector2d(i.x() + terrain_half - eps, i.y() + terrain_half - eps), hi);
+            lo = lo.cwiseMax(Eigen::Vector2i::Zero());
+            hi = hi.cwiseMin(max_idx);
+            for (int x = lo.x(); x <= hi.x(); ++x) {
+                for (int y = lo.y(); y <= hi.y(); ++y) {
+                    dynamic_2d_occ_(x, y) = 1; // 标记为障碍物
+                }
             }
         }
         occupancy_2d = dynamic_2d_occ_.cwiseMax(global_2d_occ_) ;
-        grid_map_ptr_->setMap(occupancy_2d);
-        //grid_map_ptr_->inflate(0.02);
-        
+        {
+            std::lock_guard<std::mutex> lock(back_mtx_);
+            grid_map_ptr_->setMap(occupancy_2d);
+            //grid_map_ptr_->inflate(0.02);
+            publish_grid_map();
+        }
     };
     auto update_odom(const rog_map::Pose& pose) -> void {
         rog_map_ptr_->updateRobotState(pose);
@@ -121,8 +144,11 @@ public:
     auto get_terrain_map() -> utils::vec_E<utils::Vec3f> {
         return terrain_map_;
     }
-    auto get_grid_map() -> std::shared_ptr<grid_map::GridMap> {
-        return grid_map_ptr_;
+    // 返回最近一次发布的只读快照。调用方持有该 shared_ptr 期间内容不变，
+    // 地图线程只写后台缓冲，写完整体换出新快照；不要通过返回值修改地图。
+    auto get_grid_map() const -> std::shared_ptr<grid_map::GridMap> {
+        std::lock_guard<std::mutex> lock(front_mtx_);
+        return front_grid_map_;
     }
     auto get_occupancy_2d()-> grid_map::RowMatrixXi {
         return occupancy_2d;
@@ -161,7 +187,18 @@ private:
 private:
     rog_map::Pose pc_pose_;
     rog_map::PointCloud cloud_;
+    // 双缓冲：grid_map_ptr_ 为后台缓冲（仅在 back_mtx_ 下写），
+    // front_grid_map_ 为对外发布的快照（每次发布新建，发布后不再修改）。
+    // 调用方须先持有 back_mtx_。
+    auto publish_grid_map() -> void {
+        auto snapshot = std::make_shared<grid_map::GridMap>(*grid_map_ptr_);
+        std::lock_guard<std::mutex> lock(front_mtx_);
+        front_grid_map_.swap(snapshot);
+    }
     std::shared_ptr<grid_map::GridMap> grid_map_ptr_;
+    std::shared_ptr<grid_map::GridMap> front_grid_map_;
+    std::mutex back_mtx_;
+    mutable std::mutex front_mtx_;
     std::shared_ptr<rog_map::ROGMap> rog_map_ptr_;
     Terrain::TerrainAnalyzer terrain_analyzer_;
     rog_map::Config cfg_;

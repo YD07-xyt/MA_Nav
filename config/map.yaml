@@ -45,7 +45,7 @@ rog_map:
   point_filt_num: 1
 
 
-  forget_threshold: 0.6                 # 遗忘阈值(s)，小于等于0表示不进行遗忘衰减
+  forget_threshold: -0.6                 # 遗忘阈值(s)，小于等于0表示不进行遗忘衰减
 
   # Terrain analysis (通过性分析)
   terrain:

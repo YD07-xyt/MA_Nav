@@ -37,5 +37,9 @@ colcon build --cmake-args -DHUMBLE_ROS=humble -DCMAKE_BUILD_TYPE=Release  -DCMAK
 ```
 
 ```sh
+ros2 service call /save_global_map std_srvs/srv/Trigger "{}"
+```
+
+```sh
 ros2 service call /save_tunnel_regions std_srvs/srv/Trigger "{}"
 ```

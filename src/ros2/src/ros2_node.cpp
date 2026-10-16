@@ -268,7 +268,9 @@ void GlobalPlanner2d::plan_omni() {
     }
     const auto now = std::chrono::steady_clock::now();
     const bool timeout = (now - plan_start_time_.value()) >= std::chrono::seconds(20);
-        auto result = fsm_replanner.plan(goal_pose.value(), current_pose.value(), ma_map_->get_grid_map());
+        // 本次规划全程使用同一份地图快照（双缓冲），地图线程的更新不会改写它
+        const auto plan_map = ma_map_->get_grid_map();
+        auto result = fsm_replanner.plan(goal_pose.value(), current_pose.value(), plan_map);
         if (!result) {
             if (timeout) {
                 plan_start_time_ = now; // 第一次失败开始计时
@@ -313,7 +315,7 @@ void GlobalPlanner2d::plan_omni() {
 
             fold_events_ = generate_fold_events(
                 result->ma_spline_traj,
-                *ma_map_->get_grid_map(),
+                *plan_map,
                 config.planner_config.path_planning_params.fold_time,
                 config.planner_config.path_planning_params.unfold_time,
                 config.planner_config.path_planning_params.fold_margin
@@ -362,7 +364,7 @@ void GlobalPlanner2d::plan_omni() {
             }
 
             visualizer
-                .visualizeTunnelAndFold(result->ma_spline_traj, route, *ma_map_->get_grid_map(), fold_pts, unfold_pts);
+                .visualizeTunnelAndFold(result->ma_spline_traj, route, *plan_map, fold_pts, unfold_pts);
         }
         auto msg = pub_nav_feedback();
 
@@ -449,9 +451,11 @@ void GlobalPlanner2d::pub_callback() {
         }
     }
     visualizer.map_viz_callback(*ma_map_);
-    if (grid_map_) {
-        visualizer.visualize_occupied_grid(*grid_map_);
-        visualizer.visualize_esdf_grid(*grid_map_);
+    // 取当前快照（与地图线程不共享同一个 shared_ptr 变量，避免并发读写指针本身）
+    if (mapInitialized) {
+        const auto viz_map = ma_map_->get_grid_map();
+        visualizer.visualize_occupied_grid(*viz_map);
+        visualizer.visualize_esdf_grid(*viz_map);
     }
 }
 
@@ -511,14 +515,14 @@ void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStam
     // 在地图语义层标记为隧道
     {
         std::unique_lock<std::shared_mutex> lock(map_mutex_);
-        auto grid_map = ma_map_->get_grid_map();
 
         std::vector<Eigen::Vector2d> eigen_polygon;
         for (const auto& p: polygon) {
             eigen_polygon.emplace_back(p.x, p.y);
         }
 
-        grid_map->semantics_polygon_region(eigen_polygon, grid_map::GridMap::Semantics::TUNNEL);
+        // 写到地图后台缓冲并发布新快照（快照只读）
+        ma_map_->set_semantics_polygon(eigen_polygon, grid_map::GridMap::Semantics::TUNNEL);
     }
 
     // 生成可视化 marker
@@ -790,7 +794,6 @@ void GlobalPlanner2d::load_clicked_regions(const std::string& yaml_path) {
 
     {
         std::unique_lock<std::shared_mutex> lock(map_mutex_);
-        auto grid_map = ma_map_->get_grid_map();
 
         clicked_regions_.clear();
         clicked_region_names_.clear();
@@ -827,7 +830,7 @@ void GlobalPlanner2d::load_clicked_regions(const std::string& yaml_path) {
                 eigen_polygon.emplace_back(p.x, p.y);
             }
 
-            grid_map->semantics_polygon_region(eigen_polygon, grid_map::GridMap::Semantics::TUNNEL);
+            ma_map_->set_semantics_polygon(eigen_polygon, grid_map::GridMap::Semantics::TUNNEL);
 
             visualization_msgs::msg::Marker region;
             region.header.stamp = nh->now();

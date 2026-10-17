@@ -15,5 +15,5 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     utils
     ${PCL_LIBRARIES}
     Eigen3::Eigen
-    yaml-cpp::yaml-cpp
+    yaml-cpp
 )

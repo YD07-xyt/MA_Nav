@@ -1,6 +1,6 @@
 rog_map:
   # 地图基本参数
-  resolution: 0.1                      # 概率地图分辨率(m)
+  resolution: 0.05                      # 概率地图分辨率(m)
   inflation_resolution: 0.1            # 膨胀分辨率(m)
   inflation_step: 1                    # 膨胀步长
   unk_inflation_en: false
@@ -45,12 +45,12 @@ rog_map:
   point_filt_num: 1
 
 
-  forget_threshold: -0.6                 # 遗忘阈值(s)，小于等于0表示不进行遗忘衰减
+  forget_threshold: 0.6                 # 遗忘阈值(s)，小于等于0表示不进行遗忘衰减
 
   # Terrain analysis (通过性分析)
   terrain:
     kernel_size: 5                      # 中值滤波核大小
-    max_step_height: 0.15               # 台阶/墙体最小高度差（触发间隙分析）
+    max_step_height: 0.1               # 台阶/墙体最小高度差（触发间隙分析）
     robot_height: 0.3                   # 机器人安全通行所需最小垂直间隙
     steep_threshold: 0.17               # 陡坡阈值
 

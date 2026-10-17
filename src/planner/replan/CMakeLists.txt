@@ -16,4 +16,5 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     path_planning
     traj_optimize
     controller
+    yaml-cpp
 )

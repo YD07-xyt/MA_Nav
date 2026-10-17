@@ -39,7 +39,7 @@ target_link_libraries(ros2 PUBLIC
 target_link_libraries(${PROJECT_NAME} PRIVATE
     spdlog::spdlog
     utils
-    yaml-cpp::yaml-cpp
+    yaml-cpp
     ${PCL_LIBRARIES}
     3d_occ_map
     path_planning

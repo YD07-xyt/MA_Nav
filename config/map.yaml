@@ -45,7 +45,7 @@ rog_map:
   point_filt_num: 1
 
 
-  forget_threshold: 0.6                 # 遗忘阈值(s)，小于等于0表示不进行遗忘衰减
+  forget_threshold: -1                  # 遗忘阈值(s)，小于等于0表示不进行遗忘衰减。关闭：按时间遗忘会误删被遮挡的静态障碍，改由射线清除动态障碍
 
   # Terrain analysis (通过性分析)
   terrain:
@@ -74,10 +74,10 @@ rog_map:
 
     # 概率参数
     p_min: 0.12
-    p_miss: 0.49
+    p_miss: 0.45                       # 原 0.49；配合 p_max 0.93，饱和体素约 5 次射线穿过即清除
     p_free: 0.499
     p_occ: 0.85
-    p_hit: 0.9
-    p_max: 0.98
+    p_hit: 0.8
+    p_max: 0.93                        # 原 0.98；上限越低，久站的动态障碍离开后清除越快
     # 未知区域阈值
     unk_thresh: 1.0

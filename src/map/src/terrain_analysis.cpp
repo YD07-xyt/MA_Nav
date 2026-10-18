@@ -7,6 +7,13 @@ namespace Terrain {
 
 auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
                               const Map &occ_map) -> Map {
+  Map free_unused;
+  return analyze(robot_pose, occ_map, free_unused);
+}
+
+auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
+                              const Map &occ_map, Map &free_out) -> Map {
+  free_out.clear();
   // 1. 确定分析窗口
   GridInfo grid = setupGrid(robot_pose.p);
 
@@ -93,8 +100,10 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
       }
 
       //【情况B】非陡峭边缘，仅凭内部高度差判断（保留原有逻辑，用于识别孤立高柱/台阶）
-      if (high_diff <= config_.max_step_height)
+      if (high_diff <= config_.max_step_height) {
+        free_out.push_back(gridToWorld(grid, gx, gy)); // 平坦地面：空闲证据
         continue;
+      }
 
       // 间隙分析（原逻辑）
       const auto &z_vals = height_lists[gy * grid.width + gx];
@@ -124,7 +133,10 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
         auto world_pt = gridToWorld(grid, gx, gy);
         world_pt.z() = obstacle_max_z;
         output.push_back(world_pt);
+      } else if (!blocked) {
+        free_out.push_back(gridToWorld(grid, gx, gy)); // 间隙足够（如桌下/隧道）：空闲证据
       }
+      // blocked 但 obstacle_max_z <= 0.15：判定不明确，不输出空闲证据
     }
   }
   return output;

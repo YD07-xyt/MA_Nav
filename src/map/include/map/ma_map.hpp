@@ -40,6 +40,8 @@ public:
         occupancy_2d = grid_map::RowMatrixXi::Zero(voxel_num.x(), voxel_num.y());
         global_2d_occ_=grid_map::RowMatrixXi::Zero(voxel_num.x(), voxel_num.y());
         dynamic_2d_occ_=grid_map::RowMatrixXi::Zero(voxel_num.x(), voxel_num.y());
+        free_streak_ = grid_map::RowMatrixXi::Zero(voxel_num.x(), voxel_num.y());
+        free_last_frame_ = grid_map::RowMatrixXi::Constant(voxel_num.x(), voxel_num.y(), -10);
         publish_grid_map();
     }
     auto set_global_map(grid_map::RowMatrixXi global_map) -> void {
@@ -90,26 +92,32 @@ public:
         rog_map_ptr_->updateProbMap(temp_pc, temp_pose);
         update_terrain();
         if(!mapping_model_){
+            // 导航模式：动态层每帧重建，静态信息来自先验 global_2d_occ_
             dynamic_2d_occ_.setZero();
         }
 
-        // 按真实占地写入：terrain 点是 terrain 格（边长 cfg_.resolution）的中心，
-        // 该中心正好落在 2D 细格边界上，直接 posToIndex 截断会随浮点误差左右跳一格。
-        // 这里把整个 terrain 格覆盖到 2D 栅格：两端各向格内收 1/4 细格再取索引，避开边界截断。
-        const double terrain_half = 0.5 * cfg_.resolution;
-        const double eps = 0.25 * grid_map_ptr_->getResolution();
-        const Eigen::Vector2i max_idx(dynamic_2d_occ_.rows() - 1, dynamic_2d_occ_.cols() - 1);
-        for(auto & i : terrain_map_){
-            Eigen::Vector2i lo, hi;
-            grid_map_ptr_->posToIndex(Eigen::Vector2d(i.x() - terrain_half + eps, i.y() - terrain_half + eps), lo);
-            grid_map_ptr_->posToIndex(Eigen::Vector2d(i.x() + terrain_half - eps, i.y() + terrain_half - eps), hi);
-            lo = lo.cwiseMax(Eigen::Vector2i::Zero());
-            hi = hi.cwiseMin(max_idx);
-            for (int x = lo.x(); x <= hi.x(); ++x) {
-                for (int y = lo.y(); y <= hi.y(); ++y) {
-                    dynamic_2d_occ_(x, y) = 1; // 标记为障碍物
+        // 障碍格：立即写 1，并清空该格的空闲计数
+        for_each_terrain_cell(terrain_map_, [this](int x, int y) {
+            dynamic_2d_occ_(x, y) = 1;
+            free_streak_(x, y) = 0;
+        });
+        if (mapping_model_) {
+            // 建图模式：dynamic_2d_occ_ 是持久地图，窗口内以 3D 当前结果为准回写，
+            // 窗口外/无观测格保持原值。空闲证据需连续 kFreeFramesToClear 帧才写 0，
+            // 防止细杆/网格单帧漏检被清掉。
+            ++frame_id_;
+            for_each_terrain_cell(terrain_free_, [this](int x, int y) {
+                if (dynamic_2d_occ_(x, y) == 0) {
+                    return;
                 }
-            }
+                // 上一帧也是空闲证据才累加，中间漏观测则重新计数
+                free_streak_(x, y) = (free_last_frame_(x, y) == frame_id_ - 1) ? free_streak_(x, y) + 1 : 1;
+                free_last_frame_(x, y) = frame_id_;
+                if (free_streak_(x, y) >= kFreeFramesToClear) {
+                    dynamic_2d_occ_(x, y) = 0;
+                    free_streak_(x, y) = 0;
+                }
+            });
         }
         occupancy_2d = dynamic_2d_occ_.cwiseMax(global_2d_occ_) ;
         {
@@ -166,15 +174,43 @@ private:
     bool mapping_model_ = true; // true: 建图模式，false: 规划模式
     utils::vec_E<utils::Vec3f> terrain_map_;
     grid_map::RowMatrixXi global_2d_occ_;     // 永久层（可 set_global_map 加载）
-    grid_map::RowMatrixXi dynamic_2d_occ_;    // 动态层（每帧重建）
+    // 导航模式：动态层（每帧重建）；建图模式：持久地图（窗口内按 3D 回写，窗口外保持）
+    grid_map::RowMatrixXi dynamic_2d_occ_;
     grid_map::RowMatrixXi occupancy_2d;
+    utils::vec_E<utils::Vec3f> terrain_free_;   // 本帧空闲证据（terrain 格中心）
+    grid_map::RowMatrixXi free_streak_;         // 建图模式：连续空闲证据帧数
+    grid_map::RowMatrixXi free_last_frame_;     // 建图模式：最近一次空闲证据的帧号
+    int frame_id_ {0};
+    static constexpr int kFreeFramesToClear = 2; // 连续 2 帧空闲证据才写 0
+
+    // 把 terrain 格中心列表按真实占地映射到 2D 细格：terrain 点是 terrain 格（边长 cfg_.resolution）
+    // 的中心，正好落在 2D 细格边界上，直接 posToIndex 截断会随浮点误差左右跳一格。
+    // 两端各向格内收 1/4 细格再取索引，避开边界截断。
+    template <typename F>
+    auto for_each_terrain_cell(const utils::vec_E<utils::Vec3f>& cells, F&& fn) -> void {
+        const double terrain_half = 0.5 * cfg_.resolution;
+        const double eps = 0.25 * grid_map_ptr_->getResolution();
+        const Eigen::Vector2i max_idx(dynamic_2d_occ_.rows() - 1, dynamic_2d_occ_.cols() - 1);
+        for (const auto& c: cells) {
+            Eigen::Vector2i lo, hi;
+            grid_map_ptr_->posToIndex(Eigen::Vector2d(c.x() - terrain_half + eps, c.y() - terrain_half + eps), lo);
+            grid_map_ptr_->posToIndex(Eigen::Vector2d(c.x() + terrain_half - eps, c.y() + terrain_half - eps), hi);
+            lo = lo.cwiseMax(Eigen::Vector2i::Zero());
+            hi = hi.cwiseMin(max_idx);
+            for (int x = lo.x(); x <= hi.x(); ++x) {
+                for (int y = lo.y(); y <= hi.y(); ++y) {
+                    fn(x, y);
+                }
+            }
+        }
+    }
     auto update_terrain() -> void {
         utils::Vec3f box_max = rog_map_ptr_->robot_state_.p + cfg_.visualization_range / 2;
         utils::Vec3f box_min = rog_map_ptr_->robot_state_.p - cfg_.visualization_range / 2;
         utils::vec_E<utils::Vec3f> inf_occ_map, real_occ_map;
         //rog_map_ptr_->boxSearchInflate(box_min, box_max, utils::OCCUPIED, inf_occ_map);
         rog_map_ptr_->boxSearch(box_min, box_max, utils::OCCUPIED, real_occ_map);
-        terrain_map_ = terrain_analyzer_.analyze(rog_map_ptr_->robot_state_, real_occ_map);
+        terrain_map_ = terrain_analyzer_.analyze(rog_map_ptr_->robot_state_, real_occ_map, terrain_free_);
         // utils::vec_E<utils::Vec3f> output;
         // for (auto pt: terrain_map) {
         //     if (pt.z() - rog_map_ptr_->robot_state_.p.z() < 0.07) {

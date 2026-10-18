@@ -35,6 +35,13 @@ public:
     auto analyze(const utils::RobotState& robot_pose,
                  const Map& occ_map) -> Map;
 
+    // 同上，额外输出空闲证据 free_out（网格中心，z=0）：
+    // 本帧该格自身有占据点（地面可见）、未判为障碍，且判定明确
+    // （平坦，或间隙分析为可通行）。仅因绝对高度阈值未判障碍的格不算空闲，
+    // 这类格保持原值，避免把低矮障碍回写成空闲。
+    auto analyze(const utils::RobotState& robot_pose,
+                 const Map& occ_map, Map& free_out) -> Map;
+
 private:
     Config config_;
 

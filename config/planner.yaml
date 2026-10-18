@@ -8,7 +8,7 @@ ros2:
   cmd_vel_name: "/cmd_vel_chassis" #"/cmd_vel" #"/cmd_vel_chassis"
   save_global_map_path:  "src/nav/MA_Nav/map"
   save_map_srv_topic: "/save_global_map"
-  map_params_path: "src/nav/MA_Nav/config/map.yaml"   # 地图参数
+  map_params_path: "config/map.yaml"   # 地图参数
   global_map_path: "src/nav/MA_Nav/map/global_maps.pgm" # 全局栅格地图
   is_minco: false
     # 点击隧道区域保存/加载
@@ -16,7 +16,7 @@ ros2:
   save_tunnel_regions_srv_topic: "/save_tunnel_regions"
 # ==================== 地图模式 ====================
 map:
-  mapping_model: false   # true=建图模式，false=规划模式
+  mapping_model: true   # true=建图模式，false=规划模式
 
 # ==================== 规划器配置 ====================
 planner_config:
@@ -50,6 +50,7 @@ planner_config:
     a_max: 5.0
     integral_num_steps: 8
 
+    #暂时无用
     weight_yaw_vel: 40.0
     weight_yaw_acc: 40.0
     yaw_rate_max: 1.5

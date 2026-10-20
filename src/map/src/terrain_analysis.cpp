@@ -48,16 +48,62 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
     }
   }
 
-  // 4. 中值滤波平滑地面高度
+  // 4. 保留一份未平滑的格内最低点：台阶边沿判据要用原始值，平滑会把边沿抹掉
+  const Eigen::ArrayXXf ground_raw = ground;
+
+  // 5. 中值滤波平滑地面高度（沿坡面连续，坡面靠它保持可通行）
   ground = medianFilter(ground, config_.kernel_size);
 
-  // =================计算邻域高度梯度 =================
+  // ================= 参考地面 z_ref =================
+  // 只用格内最低点当地面会把台阶踏面、悬空物下方当成"地面"：
+  //   - 台阶踏面格：格内只有台面点，最低点就是台面 → 自认平坦地面 → 台阶漏检；
+  //   - 限高杆靠近高台：邻域地面被坡/台面抬高 → 高差判成墙 → 限高杆被误杀。
+  // 这里引入"邻域最低地面"：如果本格地面明显高于邻域最低地面，说明本格地面被抬高了，
+  // 改用邻域最低地面作为参考。高台内部远离边沿时邻域全是台面，参考地面仍是台面，
+  // 因此只有台阶边沿一圈会被判成障碍。
+
+  // 高出参考地面多少以内算"贴地"（平地、平缓坡）
+  static constexpr float kObstacleBand = 0.08f;
+  // 本格地面比邻域最低地面高出多少，才认为本格地面被抬高了
+  static constexpr float kGroundJumpThresh = 0.10f;
+  // 邻域最低地面的搜索半径（格），2 对应 5×5、按 0.05 m 分辨率约 0.25 m
+  static constexpr int kGroundMinRadius = 2;
+
+  Eigen::ArrayXXf z_ref = Eigen::ArrayXXf::Constant(
+      grid.width, grid.height, std::numeric_limits<float>::quiet_NaN());
+
+  for (int gy = 0; gy < grid.height; ++gy) {
+    for (int gx = 0; gx < grid.width; ++gx) {
+      const float g_med = ground(gx, gy);
+      if (std::isnan(g_med)) continue;
+
+      float g_min = g_med;
+      for (int dy = -kGroundMinRadius; dy <= kGroundMinRadius; ++dy) {
+        for (int dx = -kGroundMinRadius; dx <= kGroundMinRadius; ++dx) {
+          if (dx == 0 && dy == 0) continue;
+          const int nx = gx + dx;
+          const int ny = gy + dy;
+          if (nx < 0 || nx >= grid.width || ny < 0 || ny >= grid.height) continue;
+          const float neighbor = ground_raw(nx, ny);
+          if (std::isnan(neighbor)) continue;
+          if (neighbor < g_min) g_min = neighbor;
+        }
+      }
+      // 邻域存在明显更低的接地格 → 本格地面被抬高，以低的为准；否则沿用平滑后的地面
+      z_ref(gx, gy) = (g_med - g_min > kGroundJumpThresh) ? g_min : g_med;
+    }
+  }
+  // =========================================================
+
+  // =================计算参考地面的邻域高度梯度 =================
+  // 只在 z_ref 上算梯度：地面本身不连续（台阶/陡坡）才会触发，
+  // 限高杆靠近高台时 z_ref 是连续的低处地面，不会被误触发。
 
   Eigen::ArrayXXf gradient = Eigen::ArrayXXf::Zero(grid.width, grid.height);
 
   for (int gy = 0; gy < grid.height; ++gy) {
     for (int gx = 0; gx < grid.width; ++gx) {
-      if (std::isnan(ground(gx, gy))) continue;
+      if (std::isnan(z_ref(gx, gy))) continue;
       float max_diff = 0.0f;
       // 遍历8邻域
       for (int dy = -1; dy <= 1; ++dy) {
@@ -66,8 +112,8 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
           int nx = gx + dx;
           int ny = gy + dy;
           if (nx < 0 || nx >= grid.width || ny < 0 || ny >= grid.height)
-          continue; float neighbor = ground(nx, ny); if
-          (std::isnan(neighbor)) continue; float diff = std::abs(ground(gx,
+          continue; float neighbor = z_ref(nx, ny); if
+          (std::isnan(neighbor)) continue; float diff = std::abs(z_ref(gx,
           gy) - neighbor); if (diff > max_diff) max_diff = diff;
         }
       }
@@ -77,66 +123,53 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
   // =========================================================
 
   // 综合判断并输出障碍物
+  // 判据：相对参考地面 z_ref
+  //   1) 没有高出 z_ref + kObstacleBand 的点           → 贴地（平地、平缓坡），可通行
+  //   2) 最低悬空点 - z_ref >= robot_height            → 可从下方通过（限高杆/隧道/桌下），可通行
+  //   3) 其余                                          → 障碍（台阶、墙、立柱、陡坡）
   Map output;
   output.reserve(grid.width * grid.height);
 
   for (int gy = 0; gy < grid.height; ++gy) {
     for (int gx = 0; gx < grid.width; ++gx) {
-      float current_ground = ground(gx, gy);
-      if (std::isnan(current_ground)) continue;
+      const float ground_ref = z_ref(gx, gy);
+      if (std::isnan(ground_ref)) continue;
 
-      float obstacle_max_z = max_height(gx, gy);
-      if (std::isnan(obstacle_max_z)) continue;
+      const float obstacle_max_z = max_height(gx, gy);
+      if (std::isnan(obstacle_max_z)) continue;  // 本格无观测，不下结论
 
-      float high_diff = obstacle_max_z - current_ground;
-      bool is_steep_edge = (gradient(gx, gy) > config_.steep_threshold);
+      const auto &z_vals = height_lists[gy * grid.width + gx];
 
-      // 【情况A】邻域存在陡峭高度突变 → 直接判定为垂直障碍（墙/悬崖）
-      if (is_steep_edge) {
-        auto world_pt = gridToWorld(grid, gx, gy);
-        world_pt.z() = obstacle_max_z; // 保留墙体/悬崖顶部的高度
-        output.push_back(world_pt);
-        continue; // 直接跳过后续间隙检查
+      // 高出参考地面的点里最低的那个，即挡住通行的那一层的下沿
+      float z_low = std::numeric_limits<float>::quiet_NaN();
+      for (float z : z_vals) {
+        if (z <= ground_ref + kObstacleBand) continue;
+        if (std::isnan(z_low) || z < z_low) z_low = z;
       }
 
-      //【情况B】非陡峭边缘，仅凭内部高度差判断（保留原有逻辑，用于识别孤立高柱/台阶）
-      if (high_diff <= config_.max_step_height) {
-        free_out.push_back(gridToWorld(grid, gx, gy)); // 平坦地面：空闲证据
+      if (std::isnan(z_low)) {
+        // 全部点都贴着参考地面：地面本身
+        // 地面在邻域内有明显跳变（台阶顶面、陡坡）时仍判障碍
+        if (gradient(gx, gy) > config_.steep_threshold) {
+          auto world_pt = gridToWorld(grid, gx, gy);
+          world_pt.z() = obstacle_max_z;
+          output.push_back(world_pt);
+        } else {
+          free_out.push_back(gridToWorld(grid, gx, gy));  // 平坦地面/平缓坡：空闲证据
+        }
         continue;
       }
 
-      // 间隙分析（原逻辑）
-      const auto &z_vals = height_lists[gy * grid.width + gx];
-      if (z_vals.empty()) continue;
-
-      std::vector<float> heights;
-      heights.reserve(z_vals.size());
-      for (float z : z_vals) {
-        if (z >= current_ground - 0.05f) { // 过滤过低噪声
-          heights.push_back(z);
-        }
-      }
-      if (heights.empty()) continue;
-
-      std::sort(heights.begin(), heights.end());
-      float last_z = current_ground;
-      float max_gap = 0.0f;
-      for (float z : heights) {
-        if (z <= last_z) continue;
-        float gap = z - last_z;
-        if (gap > max_gap) max_gap = gap;
-        last_z = z;
-      }
-
-      bool blocked = (max_gap < config_.robot_height);
-      if (blocked && obstacle_max_z > 0.15f) {
+      const float vertical_gap = z_low - ground_ref;
+      if (vertical_gap >= config_.robot_height) {
+        // 下方间隙足够，可从下方通过（限高杆、隧道、桌下）
+        free_out.push_back(gridToWorld(grid, gx, gy));
+      } else {
+        // 间隙不足：台阶立面、墙、立柱、陡坡
         auto world_pt = gridToWorld(grid, gx, gy);
         world_pt.z() = obstacle_max_z;
         output.push_back(world_pt);
-      } else if (!blocked) {
-        free_out.push_back(gridToWorld(grid, gx, gy)); // 间隙足够（如桌下/隧道）：空闲证据
       }
-      // blocked 但 obstacle_max_z <= 0.15：判定不明确，不输出空闲证据
     }
   }
   return output;

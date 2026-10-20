@@ -194,17 +194,17 @@ auto JPS::jps_search(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, 
     const auto start_time = std::chrono::steady_clock::now();
 
     if (nx_ <= 0 || ny_ <= 0) {
-        logger::planning->error("JPS: map is not set!");
+        logger::error(logger::planning, "JPS: map is not set!");
         return {};
     }
 
     // 与 AStar::original_astar_search 相同的起终点有效性检查。
     if (check_collision(start)) {
-        logger::planning->error("JPS: start point in collision!");
+        logger::error(logger::planning,"JPS: start point in collision!");
         return {};
     }
     if (check_collision(goal)) {
-        logger::planning->error("JPS: goal point in collision!");
+        logger::error(logger::planning,"JPS: goal point in collision!");
         return {};
     }
 
@@ -224,14 +224,14 @@ auto JPS::jps_search(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, 
     const int max_snap_radius = std::max(1, static_cast<int>(1.5 / resolution_ + 0.5));
     Eigen::Vector2i root_idx;
     if (!find_navigable_cell(start_idx.x(), start_idx.y(), max_snap_radius, root_idx)) {
-        logger::planning->error(
+        logger::error(logger::planning,
             "JPS: no navigable cell within {:.1f} m of start cell ({},{}), start=({:.3f},{:.3f})",
             1.5, start_idx.x(), start_idx.y(), start.x(), start.y());
         return {};
     }
     const bool start_snapped = (root_idx != start_idx);
     if (start_snapped) {
-        logger::planning->warn(
+        logger::warn(logger::planning,
             "JPS: start not navigable, snapped ({:.3f},{:.3f}) -> ({:.3f},{:.3f})",
             start.x(), start.y(),
             (root_idx.x() + 0.5) * resolution_ + origin_.x(),
@@ -276,7 +276,7 @@ auto JPS::jps_search(const Eigen::Vector2d& start, const Eigen::Vector2d& goal, 
         // 超时检查(与 AStar 的粒度一致)。
         if (std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - start_time).count() > timeout_ms) {
-            logger::planning->error("JPS timeout!");
+            logger::error(logger::planning,"JPS timeout!");
             return {};
         }
 

@@ -47,20 +47,26 @@ rog_map:
 
   forget_threshold: -1                  # 遗忘阈值(s)，小于等于0表示不进行遗忘衰减。关闭：按时间遗忘会误删被遮挡的静态障碍，改由射线清除动态障碍
 
-  # Terrain analysis (通过性分析)
   terrain:
-    kernel_size: 5                      # 中值滤波核大小
-    max_step_height: 0.1               # 台阶/墙体最小高度差（触发间隙分析）
-    robot_height: 0.3                   # 机器人安全通行所需最小垂直间隙
-    steep_threshold: 0.17               # 陡坡阈值
+      # 3x3 滤波，如果发现台阶边缘 2D 漏检严重，可改为 1 关闭滤波
+      kernel_size: 3                    
+      # 超过 5cm 就不当平地，必须做间隙分析
+      max_step_height: 0.05              
+      # 机器狗实际高度 + 安全余量。
+      # 改为 0.24：限高杆实测净空约 250mm，判据是"间隙 >= robot_height 才放行"，
+      # 取 0.26 时 0.25 >= 0.26 不成立，限高杆必然判障碍。0.24 可放行，20cm 台阶仍判障碍。
+      robot_height: 0.24                 
+      # 建议从 0.12 调低到 0.08，让算法对台阶和墙体边缘更敏感，
+      # 因为新代码不会因为陡峭而误杀限高杆，所以可以放心调小。
+      steep_threshold: 0.08              
 
   # 2D grid map (A* 规划用)。边界按原点向四个方向的延伸量设置：
   # x ∈ [-x_left, +x_right], y ∈ [-y_left, +y_right]，即 x,-x,y,-y
   grid_map:
     x_left: 6.0                      # 原点向左（-x）延伸 (m)
     x_right: 22.0                      # 原点向右（+x）延伸 (m)
-    y_left: 8.0                        # 原点向左（-y）延伸 (m)
-    y_right: 8.0                       # 原点向右（+y）延伸 (m)
+    y_left: 10.0                        # 原点向左（-y）延伸 (m)
+    y_right: 10.0                       # 原点向右（+y）延伸 (m)
     resolution: 0.05                   # 2D 栅格分辨率(m)
 
 

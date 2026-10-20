@@ -17,11 +17,11 @@ auto AStar::original_astar_search(const Eigen::Vector2d& start, const Eigen::Vec
 
     // Check start/goal validity
     if (check_collision(start)) {
-        logger::planning->error("start point in collision!");
+       logger::error(logger::planning,"start point in collision!");
         return {};
     }
     if (check_collision(goal)) {
-        logger::planning->error("Goal point in collision!");
+       logger::error(logger::planning,"Goal point in collision!");
         return {};
     }
 
@@ -43,7 +43,7 @@ auto AStar::original_astar_search(const Eigen::Vector2d& start, const Eigen::Vec
         if (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count()
             > timeout_ms)
         {
-            logger::planning->error("A* timeout!");
+            logger::error(logger::planning,"A* timeout!");
             return {};
         }
 

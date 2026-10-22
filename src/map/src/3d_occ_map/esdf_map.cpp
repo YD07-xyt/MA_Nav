@@ -52,7 +52,8 @@ namespace rog_map {
         half_local_update_box_i_ /= 2;
 
         resetLocalMap();
-        logger::ESDFMap->info("Init successfully, map size: {}, sub_grid_num: {}, unk_thresh: {}.", sc_.map_vox_num, md_.sub_grid_num, md_.unk_thresh);
+        logger::info(logger::ESDFMap,"Init successfully, map size: {}, sub_grid_num: {}, unk_thresh: {}.", sc_.map_vox_num, md_.sub_grid_num, md_.unk_thresh);
+        
         printMapInformation();
     }
 

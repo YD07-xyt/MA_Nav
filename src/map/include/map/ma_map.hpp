@@ -23,6 +23,10 @@ public:
         terrain_cfg.max_step_height = cfg_.terrain_max_step_height;
         terrain_cfg.robot_height = cfg_.terrain_robot_height;
         terrain_cfg.steep_threshold = cfg_.terrain_steep_threshold;
+        terrain_cfg.min_overhang_clearance = cfg_.terrain_min_overhang_clearance;
+        terrain_cfg.overhang_free_voxels = cfg_.terrain_overhang_free_voxels;
+        terrain_cfg.overhang_unknown_skip = cfg_.terrain_overhang_unknown_skip;
+        terrain_cfg.overhang_ground_radius = cfg_.terrain_overhang_ground_radius;
         terrain_cfg.resolution = cfg_.resolution;
         terrain_cfg.map_size_x = cfg_.local_update_box_d.x();
         terrain_cfg.map_size_y = cfg_.local_update_box_d.y();
@@ -204,13 +208,19 @@ private:
             }
         }
     }
+    
     auto update_terrain() -> void {
         utils::Vec3f box_max = rog_map_ptr_->robot_state_.p + cfg_.visualization_range / 2;
         utils::Vec3f box_min = rog_map_ptr_->robot_state_.p - cfg_.visualization_range / 2;
         utils::vec_E<utils::Vec3f> inf_occ_map, real_occ_map;
         //rog_map_ptr_->boxSearchInflate(box_min, box_max, utils::OCCUPIED, inf_occ_map);
         rog_map_ptr_->boxSearch(box_min, box_max, utils::OCCUPIED, real_occ_map);
-        terrain_map_ = terrain_analyzer_.analyze(rog_map_ptr_->robot_state_, real_occ_map, terrain_free_);
+        // 悬空判据需要 3D 空闲/未知证据：杆下方被射线扫空才放行（只读查询，地图线程内调用）
+        const auto voxel_query = [this](const utils::Vec3f& pos) {
+            return rog_map_ptr_->getGridType(pos);
+        };
+        terrain_map_ = terrain_analyzer_.analyze(
+            rog_map_ptr_->robot_state_, real_occ_map, terrain_free_, voxel_query);
         // utils::vec_E<utils::Vec3f> output;
         // for (auto pt: terrain_map) {
         //     if (pt.z() - rog_map_ptr_->robot_state_.p.z() < 0.07) {

@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "utils/logger.hpp"
 #include <vector>
 #include <Eigen/Eigen>
 #include <memory>
@@ -150,10 +151,16 @@ protected:
 
     // 保护 setMap/direct_set_map 不越界：输入矩阵行列必须与当前栅格一致，
     // 否则直接拒绝（尺寸不一致时按像素索引拷贝会导致错位或读越界内存）
-    bool checkMapSize(const RowMatrixXi& map) const {
+    auto checkMapSize(const RowMatrixXi& map)->bool const {
         if (map.rows() != voxel_num_.x() || map.cols() != voxel_num_.y()) {
-            std::cerr << "[GridMap] size mismatch: got " << map.rows() << "x" << map.cols() << ", expected "
-                      << voxel_num_.x() << "x" << voxel_num_.y() << ", map update rejected" << std::endl;
+            logger::error(
+                logger::GirdMap2D,
+                "size mismatch: got {}x{}, expected {}x{}, map update rejected",
+                map.rows(),
+                map.cols(),
+                voxel_num_.x(),
+                voxel_num_.y()
+            );
             return false;
         }
         return true;

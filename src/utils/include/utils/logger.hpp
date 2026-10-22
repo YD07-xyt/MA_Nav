@@ -98,14 +98,6 @@ debug(const std::shared_ptr<spdlog::logger>&,
 
 
 
-inline std::shared_ptr<spdlog::logger> Parameter = spdlog::stdout_color_mt("Parameter");
-inline std::shared_ptr<spdlog::logger> SlidingMap = spdlog::stdout_color_mt("SlidingMap");
-inline std::shared_ptr<spdlog::logger> ProbMap = spdlog::stdout_color_mt("ProbMap");
-inline std::shared_ptr<spdlog::logger> CounterMap = spdlog::stdout_color_mt("CounterMap");
-inline std::shared_ptr<spdlog::logger> InfMap = spdlog::stdout_color_mt("InfMap");
-inline std::shared_ptr<spdlog::logger> ESDFMap = spdlog::stdout_color_mt("ESDFMap");
-inline std::shared_ptr<spdlog::logger> ROGMap = spdlog::stdout_color_mt("ROGMap");
-inline std::shared_ptr<spdlog::logger> MaMap = spdlog::stdout_color_mt("MaMap");
 
 // 创建带整行颜色的 logger
 inline std::shared_ptr<spdlog::logger> create_colored_logger(const std::string& name) {
@@ -114,6 +106,18 @@ inline std::shared_ptr<spdlog::logger> create_colored_logger(const std::string& 
     logger->set_pattern("%^[%m-%d %H:%M:%S.%e] [%n] [%l] [%s:%#] %v%$");
     return logger;
 }
+
+
+inline std::shared_ptr<spdlog::logger> Parameter = create_colored_logger("Parameter");
+inline std::shared_ptr<spdlog::logger> SlidingMap =create_colored_logger("SlidingMap");
+inline std::shared_ptr<spdlog::logger> ProbMap =create_colored_logger("ProbMap");
+inline std::shared_ptr<spdlog::logger> CounterMap = create_colored_logger("CounterMap");
+inline std::shared_ptr<spdlog::logger> InfMap = create_colored_logger("InfMap");
+inline std::shared_ptr<spdlog::logger> FreeCntMap = create_colored_logger("FreeCntMap");
+inline std::shared_ptr<spdlog::logger> ESDFMap = create_colored_logger("ESDFMap");
+inline std::shared_ptr<spdlog::logger> ROGMap = create_colored_logger("ROGMap");
+inline std::shared_ptr<spdlog::logger> MaMap = create_colored_logger("MaMap");
+inline std::shared_ptr<spdlog::logger> GirdMap2D = create_colored_logger("GirdMap2D");
 
 // 使用该函数创建所有 logger
 inline std::shared_ptr<spdlog::logger> bt_replan = create_colored_logger("bt_replan");

@@ -4,6 +4,7 @@
 #include "utils/type_utils.hpp"
 #include <Eigen/Dense>
 #include <cmath>
+#include <functional>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -22,7 +23,18 @@ public:
         float max_step_height = 0.15f; // 台阶/墙体最小高度差（用于触发间隙分析）
         float robot_height = 0.3f;     // 机器人安全通行所需的最小垂直间隙
         float steep_threshold = 0.17f;  // 建议设为与 max_step_height 相近或稍大，如0.2m
+        // ---- 悬空证据（需要 voxel_query）----
+        // 间隙 >= robot_height 直接放行；[min_overhang_clearance, robot_height) 之间只有
+        // 下沿正下方的净空被射线证实（连续已知空闲一直通到地面）才放行。
+        float min_overhang_clearance = 0.225f;
+        int   overhang_free_voxels = 3;      // 下沿正下方至少连续多少个已知空闲体素
+        int   overhang_unknown_skip = 1;     // 下沿正下方允许跳过的未知体素数（杆底混合体素）
+        int   overhang_ground_radius = 6;    // 悬空列找邻域地面的半径（格）
     };
+
+    // 体素状态查询：pos 为体素中心（世界系）。杆下方被射线扫空 → KNOWN_FREE；
+    // 台面/台阶顶面下方是实心，射线进不去 → UNKNOWN。
+    using VoxelQuery = std::function<utils::GridType(const utils::Vec3f&)>;
 
     TerrainAnalyzer() = default;
     explicit TerrainAnalyzer(const Config& cfg) : config_(cfg) {}
@@ -41,6 +53,11 @@ public:
     // 这类格保持原值，避免把低矮障碍回写成空闲。
     auto analyze(const utils::RobotState& robot_pose,
                  const Map& occ_map, Map& free_out) -> Map;
+
+    // 带 3D 空闲/未知证据的版本；voxel_query 为空时与上面完全一致。
+    auto analyze(const utils::RobotState& robot_pose,
+                 const Map& occ_map, Map& free_out,
+                 const VoxelQuery& voxel_query) -> Map;
 
 private:
     Config config_;

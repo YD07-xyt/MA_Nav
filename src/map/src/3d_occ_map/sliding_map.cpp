@@ -74,11 +74,11 @@ void SlidingMap::initSlidingMap(
 }
 
 void SlidingMap::printMapInformation() {
-    logger::SlidingMap->info("resolution: {}", sc_.resolution);
-    logger::SlidingMap->info("map_sliding_en: {}", sc_.map_sliding_en);
-    logger::SlidingMap->info("local_map_size_i: {}", sc_.map_size_i.transpose());
+    logger::info(logger::SlidingMap, "resolution: {}", sc_.resolution);
+    logger::info(logger::SlidingMap, "map_sliding_en: {}", sc_.map_sliding_en);
+    logger::info(logger::SlidingMap, "local_map_size_i: {}", sc_.map_size_i.transpose());
     Eigen::Vector3d map_size_d = sc_.map_size_i.cast<double>() * sc_.resolution;
-    spdlog::info("local_map_size_d: {}", map_size_d.transpose());
+    logger::info(logger::SlidingMap, "local_map_size_d: {}", map_size_d.transpose());
 }
 
 bool SlidingMap::insideLocalMap(const utils::Vec3f& pos) const {

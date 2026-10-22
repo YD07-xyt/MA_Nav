@@ -72,11 +72,11 @@ void ProbMap::initProbMap() {
 
     cfg_.virtual_ceil_height = sc_.virtual_ceil_height_id_g * cfg_.resolution;
     cfg_.virtual_ground_height = sc_.virtual_ground_height_id_g * cfg_.resolution;
-    logger::ProbMap->info("virtual_ceil_height: {}", cfg_.virtual_ceil_height);
-    logger::ProbMap->info("virtual_ground_height: {}", cfg_.virtual_ground_height);
+    logger::info(logger::ProbMap, "virtual_ceil_height: {}", cfg_.virtual_ceil_height);
+    logger::info(logger::ProbMap, "virtual_ground_height: {}", cfg_.virtual_ground_height);
 
     if (!cfg_.map_sliding_en) {
-        logger::ProbMap->warn("Map sliding disabled, set origin to [{}]", cfg_.fix_map_origin.transpose());
+        logger::warn(logger::ProbMap, "Map sliding disabled, set origin to [{}]", cfg_.fix_map_origin.transpose());
         slideAllMap(cfg_.fix_map_origin);
     }
 
@@ -92,7 +92,7 @@ void ProbMap::initProbMap() {
     occ_timestamp_buffer_.resize(map_size, utils::get_current_dir_name());
     //forget_threshold_ = (cfg_.forget_threshold > 0) ? cfg_.forget_threshold : 10.0;
     forget_threshold_ = cfg_.forget_threshold;
-    logger::ProbMap->info("Init successfully");
+    logger::info(logger::ProbMap, "Init successfully");
     printMapInformation();
 }
 
@@ -812,7 +812,7 @@ void ProbMap::updateLocalBox(const utils::Vec3f& cur_odom) {
 }
 
 void ProbMap::resetLocalMap() {
-    logger::ProbMap->warn("Clear all local map.");
+    logger::warn(logger::ProbMap, "Clear all local map.");
     double unk_value = (cfg_.l_free + cfg_.l_occ) / 2.0;
     // Clear local map
     std::fill(occupancy_buffer_.begin(), occupancy_buffer_.end(), unk_value);

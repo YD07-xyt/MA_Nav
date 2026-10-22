@@ -85,7 +85,7 @@ void CounterMap::initCounterMap(
     md_.occupied_cnt.resize(map_size, 0);
 
     resetLocalMap();
-    logger::CounterMap->info("Init successfully, map size: {}, sub_grid_num: {}, unk_thresh: {}.", map_size, md_.sub_grid_num, md_.unk_thresh);
+    logger::info(logger::CounterMap,"Init successfully, map size: {}, sub_grid_num: {}, unk_thresh: {}.", map_size, md_.sub_grid_num, md_.unk_thresh);
     printMapInformation();
 }
 

@@ -13,18 +13,67 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
 
 auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
                               const Map &occ_map, Map &free_out) -> Map {
+  return analyze(robot_pose, occ_map, free_out, VoxelQuery{});
+}
+
+auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
+                              const Map &occ_map, Map &free_out,
+                              const VoxelQuery &voxel_query) -> Map {
   free_out.clear();
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const bool use_evidence = static_cast<bool>(voxel_query);
+  // 体素边长：terrain 网格与 ROG 体素同分辨率，occ_map 里的点都是体素中心
+  const float res = config_.resolution;
+
   // 1. 确定分析窗口
   GridInfo grid = setupGrid(robot_pose.p);
 
   // 2. 将点云分配到网格，记录每个网格的最低点和最高点
   std::vector<std::vector<float>> height_lists(grid.width * grid.height);
+  // 每格一个真实体素中心的 xy，用于向 ROG 查询该列体素状态
+  std::vector<utils::Vec3f> column_xy(grid.width * grid.height,
+                                      utils::Vec3f::Zero());
   for (const auto &pt : occ_map) {
     auto idx_opt = worldToGrid(grid, pt);
     if (!idx_opt) continue;
     auto [gx, gy] = *idx_opt;
-    height_lists[gy * grid.width + gx].push_back(pt.z());
+    auto &list = height_lists[gy * grid.width + gx];
+    if (list.empty()) column_xy[gy * grid.width + gx] = pt;
+    list.push_back(pt.z());
   }
+
+  // 从体素中心高度 z_occ 正下方开始，向下连续 KNOWN_FREE 的体素数。
+  // 允许先跳过最多 overhang_unknown_skip 个紧邻的 UNKNOWN（杆底混合体素射线清不掉）。
+  auto free_run_below = [&](int idx, float z_occ) -> int {
+    const utils::Vec3f &xy = column_xy[idx];
+    auto state_at = [&](float z) {
+      return voxel_query(utils::Vec3f(xy.x(), xy.y(), z));
+    };
+    auto run_from = [&](float z_top) {
+      int run = 0;
+      // 上限：最多向下看 2 m，防止退化成长循环
+      const int max_steps = static_cast<int>(2.0f / res);
+      for (int d = 0; d < max_steps; ++d) {
+        if (state_at(z_top - d * res) != utils::KNOWN_FREE) break;
+        ++run;
+      }
+      return run;
+    };
+    int best = run_from(z_occ - res);
+    for (int s = 1; s <= config_.overhang_unknown_skip; ++s) {
+      if (state_at(z_occ - s * res) != utils::UNKNOWN) break;
+      best = std::max(best, run_from(z_occ - (s + 1) * res));
+    }
+    return best;
+  };
+  // 已知空闲段的底（偏保守：按跳过了 overhang_unknown_skip 个未知体素估计）
+  auto free_bottom = [&](float z_occ, int run) {
+    return z_occ - 0.5f * res - (run + config_.overhang_unknown_skip) * res;
+  };
+  // 空闲段底是否接到了地面：地面是占据体素中心，容差半格
+  auto reaches_ground = [&](float bottom, float ground_z) {
+    return bottom <= ground_z + 0.5f * res + 1e-4f;
+  };
 
   // 3. 提取网格内的 最低点（作为地面） 和 最高点（作为墙体）
   Eigen::ArrayXXf ground = Eigen::ArrayXXf::Constant(
@@ -49,7 +98,55 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
   }
 
   // 4. 保留一份未平滑的格内最低点：台阶边沿判据要用原始值，平滑会把边沿抹掉
-  const Eigen::ArrayXXf ground_raw = ground;
+  Eigen::ArrayXXf ground_raw = ground;
+
+  // ================= 悬空列（需要 3D 空闲证据）=================
+  // 列的最低占据体素正下方被射线扫空，且空闲段一直通到邻域地面 → 这是悬空结构（杆）的下沿，
+  // 不是地面。台面/台阶顶面下方是实心，射线进不去只会是 UNKNOWN，不会被判成悬空；
+  // 台沿外侧被掠射射线刻出的一小段空气，底下接不到地面，也过不了"通到地面"这一条。
+  // 悬空列不提供地面高度（否则杆下沿会被当地面，杆旁的格高差误判成墙）。
+  Eigen::Array<bool, Eigen::Dynamic, Eigen::Dynamic> floating =
+      Eigen::Array<bool, Eigen::Dynamic, Eigen::Dynamic>::Constant(
+          grid.width, grid.height, false);
+  if (use_evidence) {
+    Eigen::ArrayXXi run_lo = Eigen::ArrayXXi::Zero(grid.width, grid.height);
+    Eigen::Array<bool, Eigen::Dynamic, Eigen::Dynamic> cand = floating;
+    for (int gy = 0; gy < grid.height; ++gy) {
+      for (int gx = 0; gx < grid.width; ++gx) {
+        if (std::isnan(ground_raw(gx, gy))) continue;
+        run_lo(gx, gy) = free_run_below(gy * grid.width + gx, ground_raw(gx, gy));
+        cand(gx, gy) = run_lo(gx, gy) >= config_.overhang_free_voxels;
+      }
+    }
+    // 邻域地面：非候选列的最低占据。杆宽 0.25–0.6 m，杆中间列的近邻也全是候选，半径要放大
+    const int R = config_.overhang_ground_radius;
+    for (int gy = 0; gy < grid.height; ++gy) {
+      for (int gx = 0; gx < grid.width; ++gx) {
+        if (!cand(gx, gy)) continue;
+        float g_nb = nan;
+        for (int dy = -R; dy <= R; ++dy) {
+          for (int dx = -R; dx <= R; ++dx) {
+            const int nx = gx + dx, ny = gy + dy;
+            if (nx < 0 || nx >= grid.width || ny < 0 || ny >= grid.height) continue;
+            if (cand(nx, ny)) continue;
+            const float v = ground_raw(nx, ny);
+            if (std::isnan(v)) continue;
+            if (std::isnan(g_nb) || v < g_nb) g_nb = v;
+          }
+        }
+        if (std::isnan(g_nb)) continue;  // 邻域没有地面：不下结论
+        const float z_lo = ground_raw(gx, gy);
+        floating(gx, gy) =
+            (z_lo - g_nb >= config_.min_overhang_clearance) &&
+            reaches_ground(free_bottom(z_lo, run_lo(gx, gy)), g_nb);
+      }
+    }
+    for (int gy = 0; gy < grid.height; ++gy)
+      for (int gx = 0; gx < grid.width; ++gx)
+        if (floating(gx, gy)) ground_raw(gx, gy) = nan;
+    ground = ground_raw;
+  }
+  // =========================================================
 
   // 5. 中值滤波平滑地面高度（沿坡面连续，坡面靠它保持可通行）
   ground = medianFilter(ground, config_.kernel_size);
@@ -76,6 +173,7 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
     for (int gx = 0; gx < grid.width; ++gx) {
       const float g_med = ground(gx, gy);
       if (std::isnan(g_med)) continue;
+      if (floating(gx, gy)) continue;  // 悬空列不参与参考地面与梯度
 
       float g_min = g_med;
       for (int dy = -kGroundMinRadius; dy <= kGroundMinRadius; ++dy) {
@@ -132,6 +230,11 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
 
   for (int gy = 0; gy < grid.height; ++gy) {
     for (int gx = 0; gx < grid.width; ++gx) {
+      if (floating(gx, gy)) {
+        // 悬空列：下沿正下方净空已被射线证实一直通到地面，可从下方通过
+        free_out.push_back(gridToWorld(grid, gx, gy));
+        continue;
+      }
       const float ground_ref = z_ref(gx, gy);
       if (std::isnan(ground_ref)) continue;
 
@@ -161,7 +264,15 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
       }
 
       const float vertical_gap = z_low - ground_ref;
-      if (vertical_gap >= config_.robot_height) {
+      bool pass = vertical_gap >= config_.robot_height;
+      if (!pass && use_evidence &&
+          vertical_gap >= config_.min_overhang_clearance) {
+        // 体素量化/杆底拖点使间隙偏小：下沿到地面之间被射线扫空才放行
+        const int run = free_run_below(gy * grid.width + gx, z_low);
+        pass = run >= config_.overhang_free_voxels &&
+               reaches_ground(free_bottom(z_low, run), ground_ref);
+      }
+      if (pass) {
         // 下方间隙足够，可从下方通过（限高杆、隧道、桌下）
         free_out.push_back(gridToWorld(grid, gx, gy));
       } else {

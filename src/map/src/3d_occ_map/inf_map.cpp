@@ -105,7 +105,8 @@ InfMap::InfMap(rog_map::Config& cfg) {
 
     resetLocalMap();
     cfg_ = cfg;
-    logger::InfMap->info(
+    logger::info(
+        logger::InfMap,
         "Init successfully, map size: {}, sub_grid_num: {}, unk_thresh: {}.",
         sc_.map_vox_num,
         md_.sub_grid_num,

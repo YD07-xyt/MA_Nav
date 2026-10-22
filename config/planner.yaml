@@ -24,7 +24,7 @@ planner_config:
   path_planning_params:
     safe_threshold: 0.35       # JPS/A* 与后处理的安全距离阈值 (m)
     max_vel: 3.0               # 梯形速度规划最大速度 (m/s)
-    max_acc: 5.0               # 梯形速度规划最大加速度 (m/s²)
+    max_acc: 10.0               # 梯形速度规划最大加速度 (m/s²)
     time_resolution: 0.4       # 均匀时间重采样间隔 (s)；
                                # 越小 timed_trajectory 点越密，过弯处越容易密集
     min_traj_num: 5            # 最少时间分段数，防止轨迹时间过短导致采样点太少
@@ -47,7 +47,7 @@ planner_config:
     #mode: "OMNI_XY"
     safe_distance: 0.35
     v_max: 3.0
-    a_max: 5.0
+    a_max: 10.0
     integral_num_steps: 8
 
     #暂时无用
@@ -129,5 +129,5 @@ mpc_param:
   x_max: [ 1000.0,  1000.0,  3.0,  3.0]
 
   # 控制限幅 [ax, ay]
-  u_min: [-3.0, -3.0]
-  u_max: [ 3.0,  3.0]
+  u_min: [-10.0, -10.0]
+  u_max: [ 10.0,  10.0]

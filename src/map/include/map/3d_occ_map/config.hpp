@@ -204,6 +204,10 @@ public:
         loader.LoadParam(name_space + "/terrain/max_step_height", terrain_max_step_height, 0.17f);
         loader.LoadParam(name_space + "/terrain/robot_height", terrain_robot_height, 0.3f);
         loader.LoadParam(name_space + "/terrain/steep_threshold", terrain_steep_threshold, 0.19f);
+        loader.LoadParam(name_space + "/terrain/min_overhang_clearance", terrain_min_overhang_clearance, 0.225f);
+        loader.LoadParam(name_space + "/terrain/overhang_free_voxels", terrain_overhang_free_voxels, 3);
+        loader.LoadParam(name_space + "/terrain/overhang_unknown_skip", terrain_overhang_unknown_skip, 1);
+        loader.LoadParam(name_space + "/terrain/overhang_ground_radius", terrain_overhang_ground_radius, 6);
         // 2D 栅格地图边界：原点向 x 左/右、y 左/右各延伸多少米（x ∈ [-x_left, +x_right], y ∈ [-y_left, +y_right]）
         loader.LoadParam(name_space + "/grid_map/x_left", grid_map_x_left, 20.5);
         loader.LoadParam(name_space + "/grid_map/x_right", grid_map_x_right, 20.5);
@@ -224,15 +228,14 @@ public:
 
         int n_free = ceil(l_free / l_miss);
         int n_occ = ceil(l_occ / l_hit);
-
-        logger::Parameter->info("[map]n_free: {}", n_free);
-        logger::Parameter->info("[map]n_occ: {}", n_occ);
-        logger::Parameter->info("[map]l_hit: {}", l_hit);
-        logger::Parameter->info("[map]l_miss: {}", l_miss);
-        logger::Parameter->info("[map]l_min: {}", l_min);
-        logger::Parameter->info("[map]l_max: {}", l_max);
-        logger::Parameter->info("[map]l_occ: {}", l_occ);
-        logger::Parameter->info("[map]l_free: {}", l_free);
+        logger::info(logger::Parameter,"n_free: {}", n_free);
+        logger::info(logger::Parameter,"n_occ: {}", n_occ);
+        logger::info(logger::Parameter,"l_hit: {}", l_hit);
+        logger::info(logger::Parameter,"l_miss: {}", l_miss);
+        logger::info(logger::Parameter,"l_min: {}", l_min);
+        logger::info(logger::Parameter,"l_max: {}", l_max);
+        logger::info(logger::Parameter,"l_occ: {}", l_occ);
+        logger::info(logger::Parameter,"l_free: {}", l_free);
 
         // init spherical neighbor
         for (int dx = -inflation_step; dx <= inflation_step; dx++) {
@@ -360,6 +363,10 @@ public:
     float terrain_max_step_height{};
     float terrain_robot_height{};
     float terrain_steep_threshold{};
+    float terrain_min_overhang_clearance{};
+    int terrain_overhang_free_voxels{};
+    int terrain_overhang_unknown_skip{};
+    int terrain_overhang_ground_radius{};
     double grid_map_x_left{20.5};
     double grid_map_x_right{20.5};
     double grid_map_y_left{8.0};

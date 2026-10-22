@@ -26,6 +26,7 @@
 #pragma once
 #include"config.hpp"
 #include "sliding_map.h"
+#include "utils/logger.hpp"
 #include <memory>
 
 namespace rog_map {
@@ -47,7 +48,7 @@ namespace rog_map {
             int map_size = sc_.map_size_i.prod();
             neighbor_free_cnt.resize(map_size, 0);
             resetLocalMap();
-            //std::cout << GREEN << " -- [InfMap] Init successfully -- ." << RESET << std::endl;
+            logger::info(logger::FreeCntMap,"Init successfully, map size: {}.", map_size);
             printMapInformation();
         }
 

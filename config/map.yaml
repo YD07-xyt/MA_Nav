@@ -22,7 +22,7 @@ rog_map:
     enable: true
     cloud_topic: "/lio/cloud_world"
     odom_topic: "/lio/base_odom"
-    odom_timeout: 0.5
+    odom_timeout: 0.2
 
   map_sliding:
     enable: true                      # 禁用滑动窗口（因为已固定原点）
@@ -59,6 +59,15 @@ rog_map:
       # 建议从 0.12 调低到 0.08，让算法对台阶和墙体边缘更敏感，
       # 因为新代码不会因为陡峭而误杀限高杆，所以可以放心调小。
       steep_threshold: 0.08              
+      # ---- 悬空结构（杆/洞）3D 证据 ----
+      # 间隙在 [min_overhang_clearance, robot_height) 之间时，只有下沿正下方被射线扫空、
+      # 且空闲段一直通到地面才放行；悬空列（最低占据下方就是已知空闲）不当地面来源。
+      # 台面/台阶顶面下方是实心，射线进不去（未知），不会被放行。
+      # 0.225：rosbag 回放里 0.18 会多放掉 2 格台阶边沿，0.225 台阶与旧逻辑一致。
+      min_overhang_clearance: 0.225
+      overhang_free_voxels: 3          # 下沿正下方至少连续 3 个已知空闲体素（0.15 m）
+      overhang_unknown_skip: 1         # 允许跳过 1 个未知体素（杆底混合体素）
+      overhang_ground_radius: 6        # 悬空列找邻域地面的半径（格，0.3 m）
 
   # 2D grid map (A* 规划用)。边界按原点向四个方向的延伸量设置：
   # x ∈ [-x_left, +x_right], y ∈ [-y_left, +y_right]，即 x,-x,y,-y

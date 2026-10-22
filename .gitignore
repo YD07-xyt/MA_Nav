@@ -4,3 +4,6 @@ log
 .vscode
 .cache
 3rd
+.tmp_a2_cache
+.tmp_a2_cache2
+rosbag

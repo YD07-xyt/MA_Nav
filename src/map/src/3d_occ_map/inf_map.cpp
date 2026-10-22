@@ -137,7 +137,7 @@ void InfMap::boxSearch(
 ) const {
     out_points.clear();
     if (map_empty_) {
-        logger::InfMap->warn("Map is empty, cannot perform box search.");
+        logger::warn(logger::InfMap,"Map is empty, cannot perform box search.");
         return;
     }
     utils::Vec3i box_min_id_g, box_max_id_g;
@@ -147,7 +147,7 @@ void InfMap::boxSearch(
     if (gt == utils::UNKNOWN) {
         if (!cfg_.unk_inflation_en) {
             out_points.clear();
-            logger::InfMap->warn("Unknown inflation is not enabled, cannot perform box search.");
+             logger::warn(logger::InfMap,"Unknown inflation is not enabled, cannot perform box search.");
             return;
         }
         out_points.reserve(box_size.prod());

@@ -304,17 +304,17 @@ void ProbMap::updateProbMap(const PointCloud& cloud, const Pose& pose) {
     const utils::Vec3f& pos = pose.first;
     time_consuming_[4] = cloud.size();
     if (cfg_.map_sliding_en && !insideLocalMap(pos) && raycast_data_.batch_update_counter == 0) {
-        logger::ProbMap->warn("cur_pose out of map range, reset the map.");
-        logger::ProbMap->warn("Sliding to map center at: {}", pos.transpose());
+        logger::warn(logger::ProbMap, "cur_pose out of map range, reset the map.");
+       logger::warn(logger::ProbMap, "Sliding to map center at: {}", pos.transpose());
         slideAllMap(pos);
         return;
     }
 
     if (pos.z() > cfg_.virtual_ceil_height) {
-        logger::ProbMap->warn("Odom above virtual ceil, please check map parameter.");
+        logger::warn(logger::ProbMap, "Odom above virtual ceil, please check map parameter.");
         return;
     } else if (pos.z() < cfg_.virtual_ground_height) {
-        logger::ProbMap->warn("Odom below virtual ground, please check map parameter.");
+        logger::warn(logger::ProbMap, "Odom below virtual ground, please check map parameter.");
         return;
     }
 
@@ -426,17 +426,17 @@ void ProbMap::boxSearch(
 ) const {
     out_points.clear();
     if (map_empty_) {
-        logger::ProbMap->warn("Map is empty, cannot perform box search.");
+       logger::warn(logger::ProbMap, "Map is empty, cannot perform box search.");
         return;
     }
     if ((_box_max - _box_min).minCoeff() <= 0) {
-        logger::ProbMap->warn("Box search failed, box size is zero.");
+        logger::warn(logger::ProbMap, "Box search failed, box size is zero.");
         return;
     }
     utils::Vec3f box_min_d = _box_min, box_max_d = _box_max;
     boundBoxByLocalMap(box_min_d, box_max_d);
     if ((box_max_d - box_min_d).minCoeff() <= 0) {
-        logger::ProbMap->warn("Box search failed, box size is zero.");
+       logger::warn(logger::ProbMap, "Box search failed, box size is zero.");
 
         return;
     }
@@ -503,7 +503,7 @@ void ProbMap::boxSearchInflate(
 void ProbMap::boundBoxByLocalMap(utils::Vec3f& box_min, utils::Vec3f& box_max) const {
     if ((box_max - box_min).minCoeff() <= 0) {
         box_min = box_max;
-        logger::ProbMap->warn("Bound box is invalid.");
+        logger::warn(logger::ProbMap, "Bound box is invalid.");
         return;
     }
 
@@ -846,6 +846,6 @@ void ProbMap::applyForgetting() {
         }
     }
     if (cleared > 0) {
-        logger::ProbMap->debug("[Forget] cleared {} cells older than {:.1f}s", cleared, forget_threshold_);
+        logger::debug(logger::ProbMap, "[Forget] cleared {} cells older than {:.1f}s", cleared, forget_threshold_);
     }
 }

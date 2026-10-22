@@ -219,6 +219,8 @@ inline void load_replan_param(const YAML::Node& node, replan::FsmReplan::ReplanP
         param.minco_traj_continuity_threshold = node["minco_traj_continuity_threshold"].as<double>();
     if (node["projection_search_resolution"])
         param.projection_search_resolution = node["projection_search_resolution"].as<double>();
+    if (node["brake_acc"]) param.brake_acc = node["brake_acc"].as<double>();
+    if (node["brake_acc_max"]) param.brake_acc_max = node["brake_acc_max"].as<double>();
 }
 
 // ============================================================

@@ -76,6 +76,14 @@ struct MaSplineInput {
     double end_yaw_rate = 0.0;
     double end_yaw_acc = 0.0;
 };
+// 反向重规划时拼在样条前面的匀减速刹车段（局部时间 [0, duration)）
+struct BrakeSegment {
+    double duration = 0.0; // 0 表示没有刹车段
+    Eigen::Vector2d p0 = Eigen::Vector2d::Zero();
+    Eigen::Vector2d v0 = Eigen::Vector2d::Zero();
+    Eigen::Vector2d acc = Eigen::Vector2d::Zero(); // 恒定减速度，方向与 v0 相反
+    bool emergency = false; // 刹车距离不够（需要的减速度 > brake_acc_max）：控制器在刹车段时长内直接发零速
+};
 struct MAsplineOutput {
     std::vector<double> time_segments;
     double start_time = 0.0;
@@ -83,9 +91,40 @@ struct MAsplineOutput {
     //SplineTrajectory::QuinticSplineND<2> xy_spline;
     SplineTrajectory::QuinticSplineND<3> trajectory;//xy_yaw_spline;
 
+    BrakeSegment brake; // 刹车段在前，样条从刹停点开始
+
     double cost = 0.0;
     bool success = false;
 };
+
+// 刹车段 + 样条的总时长
+inline double total_duration(const MAsplineOutput& out) {
+    const double spline_dur = out.trajectory.isInitialized() ? out.trajectory.getDuration() : 0.0;
+    return out.brake.duration + spline_dur;
+}
+
+// 按局部时间 t 采样 xy 的位置/速度/加速度：刹车段用匀减速解析式，之后采样样条
+inline void sample_xy(
+    const MAsplineOutput& out,
+    double t,
+    Eigen::Vector2d& p,
+    Eigen::Vector2d& v,
+    Eigen::Vector2d& a
+) {
+    const auto& b = out.brake;
+    t = std::max(0.0, t);
+    if (t < b.duration) {
+        p = b.p0 + b.v0 * t + 0.5 * b.acc * t * t;
+        v = b.v0 + b.acc * t;
+        a = b.acc;
+        return;
+    }
+    const auto& traj = out.trajectory.getTrajectory();
+    const double ts = out.trajectory.getStartTime() + std::clamp(t - b.duration, 0.0, out.trajectory.getDuration());
+    p = traj.evaluate(ts, 0).head<2>();
+    v = traj.evaluate(ts, 1).head<2>();
+    a = traj.evaluate(ts, 2).head<2>();
+}
 
 static double unwrap_yaw(double previous, double current) {
     return previous + std::remainder(current - previous, 2.0 * M_PI);

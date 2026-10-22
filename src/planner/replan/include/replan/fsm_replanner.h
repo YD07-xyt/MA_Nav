@@ -31,6 +31,9 @@ public:
         double minco_traj_continuity_threshold; ///< 轨迹连续性距离阈值
             ///< (m)，机器人距轨迹投影点小于此值时使用投影点边界
         double projection_search_resolution; ///< 投影点搜索时间分辨率 (s)，越小越精确但计算量越大
+        // 反向重规划刹车段：常规减速度；空间不够时最多提到 brake_acc_max，仍不够则急停（发零速）
+        double brake_acc = 6.0; ///< 常规刹车减速度 (m/s²)
+        double brake_acc_max = 10.0; ///< 刹车减速度上限 (m/s²)，应 ≤ 底盘真实能力且 ≤ MPC u_max
     } replan_param;
     struct PlannerConfig {
         ReplanParam replan_params;
@@ -101,7 +104,7 @@ private:
 private:
     /**replan */
     bool has_valid_trajectory_ = false; ///< 是否有有效的历史轨迹
-    std::chrono::system_clock::time_point last_trajectory_time_; ///< 上一条轨迹的发布时间戳
+    std::chrono::steady_clock::time_point last_trajectory_time_; ///< 上一条轨迹的发布时间戳（刹车段按时间推进用）
 private:
     // 将过于靠近障碍物的点沿 ESDF 梯度外推到安全距离，确保 A*/碰撞检测可通过
     auto get_safe_pos(const Eigen::Vector2d& pos, const grid_map::GridMap& grid_map, const double& safe_threshold)
@@ -114,6 +117,13 @@ private:
         const double& safe_threshold
     ) -> bool;
     auto lateral_deviation(const Eigen::Vector2d& pos, const std::vector<Eigen::Vector2d>& path) -> double;
+    // 反向重规划：沿速度方向生成匀减速刹车段（ESDF 射线检测可用距离）
+    auto plan_brake_segment(
+        const Eigen::Vector2d& p0,
+        const Eigen::Vector2d& v0,
+        const grid_map::GridMap& grid_map,
+        const double& safe_threshold
+    ) -> ma_spline_opt::BrakeSegment;
 
 private:
     /**

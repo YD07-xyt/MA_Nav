@@ -46,10 +46,13 @@ auto FsmReplan::plan(
     }
 
     //机器人偏离参考路径超过 replan_lateral_dev_
-    const double lateral_dev = lateral_deviation(
-        Eigen::Vector2d(current_pose.p.x(), current_pose.p.y()),
-        last_opt_path_.empty() ? result_.planning_traj.optimized_path : last_opt_path_
-    );
+    // 有刹车段时把刹车起点接到路径前面（刹车段是 p0 -> 刹停点的直线），避免刹车过程中被判为横向偏离
+    std::vector<Eigen::Vector2d> ref_path =
+        last_opt_path_.empty() ? result_.planning_traj.optimized_path : last_opt_path_;
+    if (result_.ma_spline_traj.brake.duration > 0.0 && !ref_path.empty()) {
+        ref_path.insert(ref_path.begin(), result_.ma_spline_traj.brake.p0);
+    }
+    const double lateral_dev = lateral_deviation(Eigen::Vector2d(current_pose.p.x(), current_pose.p.y()), ref_path);
 
     if (lateral_dev > planner_config_.replan_params.replan_lateral_dev) {
         need_replan_ = true;
@@ -70,31 +73,38 @@ auto FsmReplan::plan(
 
         path_planning.set_use_jps(true);
 
-        // 起点速度/加速度：默认冷启动（里程计速度，世界系；加速度 0）。
-        // 有上一条有效样条时热启动（同 navkit prepareHotStart）：取机器人在旧样条上
-        // 最近投影时刻的 v(t)、a(t)，避免把里程计瞬时速度当硬边界导致起点甩弧。
-        Eigen::Vector2d start_vel(current_pose.v.x(), current_pose.v.y());
+        // 起点速度/加速度：取机器人在上一条参考（刹车段 + 样条）上最近投影时刻的计划 v(t)、a(t)
+        // （同 navkit prepareHotStart）。不使用里程计速度；没有可用的上一条参考时按静止处理。
+        Eigen::Vector2d start_vel = Eigen::Vector2d::Zero();
         Eigen::Vector2d start_acc = Eigen::Vector2d::Zero();
         bool hot_start = false;
-        const auto& last_spline = result_.ma_spline_traj;
-        if (last_spline.success && last_spline.trajectory.isInitialized()) {
-            const double dur = last_spline.trajectory.getDuration();
-            const double t0 = last_spline.trajectory.getStartTime();
-            const auto& traj = last_spline.trajectory.getTrajectory();
+        const auto& last_out = result_.ma_spline_traj;
+        if (last_out.success && last_out.trajectory.isInitialized()) {
+            const double dur = ma_spline_opt::total_duration(last_out);
             const double res = std::max(planner_config_.replan_params.projection_search_resolution, 1e-3);
+            Eigen::Vector2d p, v, a;
             double best_t = 0.0;
             double best_d = std::numeric_limits<double>::max();
-            for (double t = 0.0; t <= dur + 1e-9; t += res) {
-                const double d = (traj.evaluate(t0 + t, 0).head<2>() - robot_pos).squaredNorm();
-                if (d < best_d) {
-                    best_d = d;
-                    best_t = t;
+            // 有刹车段时：反向样条原路经过刹车段，同一位置在两段上都有投影，按位置找会取到刹车段的前向速度
+            // （机器人没完全跟到刹停点时还会再生成一次前向刹车段，循环卡死）。
+            // 刹车段与控制器一致按时间推进：发布后还在刹车时长内就取该时刻的刹车状态；否则只在样条上找。
+            const double brake_T = last_out.brake.duration;
+            const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - last_trajectory_time_).count();
+            if (brake_T > 0.0 && elapsed < brake_T) {
+                best_t = std::max(0.0, elapsed);
+            } else {
+                for (double t = brake_T; t <= dur + 1e-9; t += res) {
+                    ma_spline_opt::sample_xy(last_out, t, p, v, a);
+                    const double d = (p - robot_pos).squaredNorm();
+                    if (d < best_d) {
+                        best_d = d;
+                        best_t = t;
+                    }
                 }
             }
-            // 投影时刻越界（在旧轨迹起点之前或已走完）时回退冷启动
-            if (best_t > 0.0 && best_t < dur) {
-                start_vel = traj.evaluate(t0 + best_t, 1).head<2>();
-                start_acc = traj.evaluate(t0 + best_t, 2).head<2>();
+            // 投影到旧参考终点（已走完）时按静止处理
+            if (best_t < dur) {
+                ma_spline_opt::sample_xy(last_out, best_t, p, start_vel, start_acc);
                 hot_start = true;
             }
         }
@@ -110,6 +120,50 @@ auto FsmReplan::plan(
             return tl::make_unexpected(PathError::PLANNING_FAILED);
         }
 
+        // 新路径首段方向，用于反向判定与速度投影
+        auto path_first_dir = [](const std::vector<Eigen::Vector2d>& opt_path) -> Eigen::Vector2d {
+            if (opt_path.size() >= 2) {
+                const Eigen::Vector2d seg = opt_path[1] - opt_path[0];
+                if (seg.norm() > 1e-6) return seg.normalized();
+            }
+            return Eigen::Vector2d::Zero();
+        };
+        Eigen::Vector2d first_dir = path_first_dir(trajectory->optimized_path);
+
+        // ---------- 反向：速度与新路径首段夹角 > 90° ----------
+        // 先沿当前速度方向匀减速刹停（刹车段），再从刹停点以零速规划反向轨迹。
+        ma_spline_opt::BrakeSegment brake;
+        constexpr double kMinBrakeSpeed = 0.2; // 低于该速度不单独规划刹车段，直接按静止起步
+        const double speed = start_vel.norm();
+        if (first_dir.norm() > 0.5 && speed > 1e-6 && start_vel.dot(first_dir) < 0.0) {
+            if (speed > kMinBrakeSpeed) {
+                brake = plan_brake_segment(robot_pos, start_vel, *grid_map, safe_threshold);
+
+                const Eigen::Vector2d stop =
+                    brake.p0 + brake.v0 * brake.duration + 0.5 * brake.acc * brake.duration * brake.duration;
+                start = get_safe_pos(stop, *grid_map, safe_threshold);
+                logger::info(logger::fsm_replan,
+                    "reverse replan: v={:.2f} brake a={:.2f} T={:.2f}s dist={:.2f}m emergency={}",
+                    speed, brake.acc.norm(), brake.duration, (stop - robot_pos).norm(), brake.emergency);
+
+                path_planning.set_velocity(Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+                trajectory = path_planning.path_planning(start, goal, current_pose.yaw, goal_pose.yaw, 5000);
+                if (!trajectory.has_value()) {
+                    logger::warn(logger::fsm_replan, "planning from brake stop point failed");
+                    need_replan_ = true;
+                    return tl::make_unexpected(PathError::PLANNING_FAILED);
+                }
+                first_dir = path_first_dir(trajectory->optimized_path);
+            }
+            hot_start = false;
+            start_vel.setZero();
+            start_acc.setZero();
+        } else if (first_dir.norm() > 0.5 && speed > 0.1 && start_vel.normalized().dot(first_dir) < 0.5) {
+            // 夹角 60°~90°：只保留沿新路径首段方向的速度分量，横向分量和加速度清零
+            start_vel = start_vel.dot(first_dir) * first_dir;
+            start_acc.setZero();
+        }
+
         // MINCO 五阶轨迹优化(时间 + 平滑 + ESDF 避障 + 速度/加速度软约束)。
         // 优化失败或安全检查不过时保持 path_planning 原始轨迹,安全兜底。
         result_.planning_traj = trajectory.value();
@@ -123,25 +177,6 @@ auto FsmReplan::plan(
         minco_opt::GridMapESDF grid_map_esdf(grid_map);
         ma_opt_.set_esdf_interface(&grid_map_esdf);
         auto ma_intput = ma_spline_opt::from_path_planning_trajectory(trajectory.value());
-
-        // 新路径首段方向，用于热启动方向校验与起点挪开时的速度投影
-        Eigen::Vector2d first_dir = Eigen::Vector2d::Zero();
-        const auto& opt_path = result_.planning_traj.optimized_path;
-        if (opt_path.size() >= 2) {
-            const Eigen::Vector2d seg = opt_path[1] - opt_path[0];
-            if (seg.norm() > 1e-6) {
-                first_dir = seg.normalized();
-            }
-        }
-
-        // 热启动方向校验（同 navkit）：旧速度与新路径首段夹角 > 60° 时回退冷启动
-        if (hot_start && start_vel.norm() > 0.1 && first_dir.norm() > 0.5
-            && start_vel.normalized().dot(first_dir) < 0.5)
-        {
-            hot_start = false;
-            start_vel = Eigen::Vector2d(current_pose.v.x(), current_pose.v.y());
-            start_acc = Eigen::Vector2d::Zero();
-        }
 
         // 起点被挪开：速度只保留沿新路径首段方向的分量（反向置 0），加速度置 0
         if (start_moved) {
@@ -163,7 +198,9 @@ auto FsmReplan::plan(
             logger::info(logger::fsm_replan,"ma opt failed");
             return tl::make_unexpected(PathError::MINCO_OPT_FIALED);
         }
+        ma_output.brake = brake; // 刹车段拼在样条前面（无刹车时 duration=0）
         result_.ma_spline_traj = ma_output;
+        last_trajectory_time_ = std::chrono::steady_clock::now();
         result_.is_new_trajectory = true; 
         result_.path_state = PathState::SUCCESSED;
         old_goal_pose_ = goal_pose;
@@ -331,6 +368,58 @@ auto FsmReplan::get_safe_pos(
     }
     return safe;
 };
+// 沿速度方向匀减速刹停（参考 navkit backup_traj_optimizer_s4）：
+// 1. 沿 v 方向在 ESDF 上射线检测，得到距离 < safe_threshold 前的可用距离 L_geo；
+// 2. 常规刹车距离 L = v²/(2·brake_acc) 放得下就用 brake_acc；
+// 3. 放不下就把减速度提到 v²/(2·L_geo)，上限 brake_acc_max；
+// 4. 上限仍放不下：emergency=true，控制器在刹车段内直接发零速，参考段仍按 brake_acc_max 生成。
+auto FsmReplan::plan_brake_segment(
+    const Eigen::Vector2d& p0,
+    const Eigen::Vector2d& v0,
+    const grid_map::GridMap& grid_map,
+    const double& safe_threshold
+) -> ma_spline_opt::BrakeSegment {
+    ma_spline_opt::BrakeSegment brake;
+    const double speed = v0.norm();
+    if (speed < 1e-6) return brake;
+
+    const auto& rp = planner_config_.replan_params;
+    const double a_nom = std::max(rp.brake_acc, 1e-3);
+    const double a_cap = std::max(rp.brake_acc_max, a_nom);
+    const Eigen::Vector2d dir = v0 / speed;
+
+    // 射线最远只需检查以最小减速度刹停的距离
+    const double max_check = speed * speed / (2.0 * a_nom);
+    const double step = std::max(grid_map.getResolution() * 0.5, 0.02);
+    // 起点本身已贴近障碍时（同 DDR-opt）把阈值放到起点净空的 0.85 倍，避免一出发就判为撞墙
+    double thr = safe_threshold;
+    if (grid_map.isInsideMap(p0)) {
+        thr = std::min(thr, 0.85 * grid_map.getDistance(p0));
+    }
+    double l_geo = max_check;
+    for (double s = step; s <= max_check + 1e-9; s += step) {
+        const Eigen::Vector2d q = p0 + dir * s;
+        if (grid_map.isInsideMap(q) && grid_map.getDistance(q) < thr) {
+            l_geo = std::max(0.0, s - step);
+            break;
+        }
+    }
+
+    double a_brake = a_nom;
+    if (l_geo < max_check - 1e-9) {
+        a_brake = l_geo > 1e-3 ? speed * speed / (2.0 * l_geo) : std::numeric_limits<double>::infinity();
+        if (a_brake > a_cap) {
+            a_brake = a_cap;
+            brake.emergency = true;
+        }
+    }
+
+    brake.p0 = p0;
+    brake.v0 = v0;
+    brake.acc = -a_brake * dir;
+    brake.duration = speed / a_brake;
+    return brake;
+}
 auto FsmReplan::check_point_equal(
     const Eigen::Vector3d& pos1,
     const Eigen::Vector3d& pos2,

@@ -135,9 +135,34 @@ void GlobalPlanner2d::controller_callback() {
         return;
     }
 
-    // 用当前位置更新游标
     Eigen::Vector2d pos(current_XYTheta->x(), current_XYTheta->y());
-    t_track_ = ma_traj_interface_->update_track_time(pos, t_track_);
+
+    // 急停：刹车距离不够，刹车段时长内直接发零速（不经过 MPC）
+    if (emergency_stop_until_.has_value()) {
+        if (std::chrono::steady_clock::now() < emergency_stop_until_.value()) {
+            geometry_msgs::msg::Twist zero;
+            cmd_vel_pub_->publish(zero);
+            last_vx_world_cmd_ = 0.0;
+            last_vy_world_cmd_ = 0.0;
+            has_last_mpc_cmd_ = true;
+            return;
+        }
+        // 急停结束：跳过刹车段，从样条上离机器人最近的点开始跟踪
+        emergency_stop_until_.reset();
+        t_track_ = ma_traj_interface_->nearest_time_from(pos, ma_traj_interface_->brake_duration());
+    }
+
+    // 刹车段内按时间推进游标（反向样条与刹车段位置重合，按位置搜索会卡在刹停点附近）；之后按位置更新
+    const auto now_tp = std::chrono::steady_clock::now();
+    const double dt_ctrl = last_control_time_.has_value()
+        ? std::clamp(std::chrono::duration<double>(now_tp - last_control_time_.value()).count(), 0.0, 0.05)
+        : 0.0;
+    last_control_time_ = now_tp;
+    if (t_track_ < ma_traj_interface_->brake_duration()) {
+        t_track_ += dt_ctrl;
+    } else {
+        t_track_ = ma_traj_interface_->update_track_time(pos, t_track_);
+    }
 
     double t_now = t_track_;
 
@@ -344,12 +369,25 @@ void GlobalPlanner2d::plan_omni() {
                 t_track_ = 0.0;
             }
 
+            // 反向刹车距离不够：刹车段时长内急停发零速
+            if (ma_traj_interface_->brake_emergency()) {
+                const auto brake_ms = static_cast<int64_t>(ma_traj_interface_->brake_duration() * 1000.0);
+                emergency_stop_until_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(brake_ms);
+                logger::warn(logger::ros2, "brake distance not enough, emergency stop {} ms", brake_ms);
+            } else {
+                emergency_stop_until_.reset();
+            }
+
             //可视化
             std::vector<Eigen::Vector3d> fold_pts, unfold_pts;
 
             if (result->ma_spline_traj.success && result->ma_spline_traj.trajectory.isInitialized()) {
                 for (const auto& event: fold_events_) {
-                    const double local_t = std::clamp(event.time, 0.0, result->ma_spline_traj.trajectory.getDuration());
+                    const double local_t = std::clamp(
+                        event.time - result->ma_spline_traj.brake.duration,
+                        0.0,
+                        result->ma_spline_traj.trajectory.getDuration()
+                    );
 
                     const double t = result->ma_spline_traj.trajectory.getStartTime() + local_t;
 
@@ -972,6 +1010,11 @@ std::vector<GlobalPlanner2d::FoldEvent> GlobalPlanner2d::generate_fold_events(
             events.push_back(event);
             current_folded = event.fold;
         }
+    }
+
+    // 事件时间按样条计算；跟踪游标 t_track_ 包含前面的刹车段，统一加上刹车段时长
+    for (auto& event: events) {
+        event.time += ma_traj.brake.duration;
     }
 
     return events;

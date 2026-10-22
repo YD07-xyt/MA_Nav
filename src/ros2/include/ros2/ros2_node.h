@@ -150,6 +150,10 @@ private:
     double last_vx_world_cmd_ = 0.0;
     double last_vy_world_cmd_ = 0.0;
     bool has_last_mpc_cmd_ = false;
+    // 上一次控制回调时刻：刹车段内按时间推进跟踪游标
+    std::optional<std::chrono::steady_clock::time_point> last_control_time_;
+    // 反向刹车距离不够时的急停截止时刻：之前一直发零速，之后跳过刹车段从样条起点跟踪
+    std::optional<std::chrono::steady_clock::time_point> emergency_stop_until_;
 
 public:
     explicit GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params_path);

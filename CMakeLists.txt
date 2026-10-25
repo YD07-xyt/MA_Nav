@@ -72,7 +72,7 @@ add_subdirectory(src/planner/traj_optimize)
 add_subdirectory(src/planner/controller)
 add_subdirectory(src/planner/replan)
 add_subdirectory(src/ros2)
-
+add_subdirectory(src/test)
 
 # 添加可执行文件
 ament_auto_add_executable(ma_nav src/ma_nav.cpp)

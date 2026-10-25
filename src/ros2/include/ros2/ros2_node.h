@@ -59,7 +59,11 @@ class GlobalPlanner2d {
 private:
     Config config;
     rclcpp::Node::SharedPtr nh;
-
+    std::string frame_id; // 来自 planner.yaml ros2.frame_id，构造时赋值
+    // 输入消息 frame_id 与配置不一致时只告警一次
+    bool cloud_frame_warned_ = false;
+    bool odom_frame_warned_ = false;
+    bool target_frame_warned_ = false;
 private:
     rclcpp::CallbackGroup::SharedPtr map_cb_group_;
     rclcpp::CallbackGroup::SharedPtr planner_cb_group_;

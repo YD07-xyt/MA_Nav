@@ -151,7 +151,7 @@ protected:
 
     // 保护 setMap/direct_set_map 不越界：输入矩阵行列必须与当前栅格一致，
     // 否则直接拒绝（尺寸不一致时按像素索引拷贝会导致错位或读越界内存）
-    auto checkMapSize(const RowMatrixXi& map)->bool const {
+    auto checkMapSize(const RowMatrixXi& map) -> bool const {
         if (map.rows() != voxel_num_.x() || map.cols() != voxel_num_.y()) {
             logger::error(
                 logger::GirdMap2D,

@@ -303,6 +303,7 @@ struct Config {
     std::string save_global_map_path;
     std::string save_map_srv_topic;
     int num_threads;
+    std::string frame_id = "world"; // 全局坐标系，所有发布消息统一使用
     // 点击隧道区域
     std::string tunnel_regions_path;
     std::string save_tunnel_regions_srv_topic;
@@ -320,6 +321,7 @@ struct Config {
 
         if (config["ros2"]) {
             num_threads=config["ros2"]["num_threads"].as<int>();
+            if (config["ros2"]["frame_id"]) frame_id = config["ros2"]["frame_id"].as<std::string>();
             map_topic_name = config["ros2"]["map_topic_name"].as<std::string>();
             target_topic_name = config["ros2"]["target_topic_name"].as<std::string>();
             clickedPoint_topic_name = config["ros2"]["clickedPoint_topic_name"].as<std::string>();

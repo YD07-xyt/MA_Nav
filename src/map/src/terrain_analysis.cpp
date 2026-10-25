@@ -227,6 +227,10 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
   //   3) 其余                                          → 障碍（台阶、墙、立柱、陡坡）
   Map output;
   output.reserve(grid.width * grid.height);
+  // 本帧判为障碍的格，供后面"空列空闲证据"做邻接保护
+  Eigen::Array<bool, Eigen::Dynamic, Eigen::Dynamic> is_obstacle =
+      Eigen::Array<bool, Eigen::Dynamic, Eigen::Dynamic>::Constant(
+          grid.width, grid.height, false);
 
   for (int gy = 0; gy < grid.height; ++gy) {
     for (int gx = 0; gx < grid.width; ++gx) {
@@ -257,6 +261,7 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
           auto world_pt = gridToWorld(grid, gx, gy);
           world_pt.z() = obstacle_max_z;
           output.push_back(world_pt);
+          is_obstacle(gx, gy) = true;
         } else {
           free_out.push_back(gridToWorld(grid, gx, gy));  // 平坦地面/平缓坡：空闲证据
         }
@@ -280,9 +285,64 @@ auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,
         auto world_pt = gridToWorld(grid, gx, gy);
         world_pt.z() = obstacle_max_z;
         output.push_back(world_pt);
+        is_obstacle(gx, gy) = true;
       }
     }
   }
+
+  // ================= 空列空闲证据（需要 3D 证据）=================
+  // 本格没有任何占据体素时，上面的判据不下结论，2D 里以前写进去的障碍就永远清不掉
+  // （例：低地看到台面下方的假地面 → 台面判矮障碍；上高地后台面体素被掠射擦掉，只剩空列）。
+  // 这里补一条：本格列为空，且邻域地面往上到机身高度这段已被射线证实为空闲 → 空闲证据。
+  // 邻接保护：8 邻域本帧有障碍格时不给（台阶边沿保留的那 1 格靠邻格梯度判出，本身常是空列）。
+  if (use_evidence) {
+    const int R = config_.overhang_ground_radius;
+    const int band = static_cast<int>(std::lround(config_.robot_height / res));
+    std::vector<float> nb;
+    nb.reserve((2 * R + 1) * (2 * R + 1));
+    for (int gy = 0; gy < grid.height; ++gy) {
+      for (int gx = 0; gx < grid.width; ++gx) {
+        const int idx = gy * grid.width + gx;
+        if (!height_lists[idx].empty()) continue;  // 有占据：已由上面判据处理
+        bool near_obstacle = false;
+        for (int dy = -1; dy <= 1 && !near_obstacle; ++dy) {
+          for (int dx = -1; dx <= 1; ++dx) {
+            const int nx = gx + dx, ny = gy + dy;
+            if (nx < 0 || nx >= grid.width || ny < 0 || ny >= grid.height) continue;
+            if (is_obstacle(nx, ny)) { near_obstacle = true; break; }
+          }
+        }
+        if (near_obstacle) continue;
+        // 参考地面：邻域（非悬空）列最低占据的中位数
+        nb.clear();
+        for (int dy = -R; dy <= R; ++dy) {
+          for (int dx = -R; dx <= R; ++dx) {
+            const int nx = gx + dx, ny = gy + dy;
+            if (nx < 0 || nx >= grid.width || ny < 0 || ny >= grid.height) continue;
+            const float v = ground_raw(nx, ny);
+            if (!std::isnan(v)) nb.push_back(v);
+          }
+        }
+        if (nb.size() < 3) continue;  // 邻域地面不足：不下结论
+        auto mid = nb.begin() + (nb.size() - 1) / 2;
+        std::nth_element(nb.begin(), mid, nb.end());
+        const float g_ref = *mid;
+        // 本格中心（与体素中心对齐），从参考地面上一格到机身高度逐格查
+        const utils::Vec3f c = gridToWorld(grid, gx, gy);
+        int unknown = 0;
+        bool ok = true;
+        for (int k = 1; k <= band; ++k) {
+          const auto t = voxel_query(utils::Vec3f(c.x(), c.y(), g_ref + k * res));
+          if (t == utils::KNOWN_FREE) continue;
+          if (t == utils::UNKNOWN && ++unknown <= config_.overhang_unknown_skip) continue;
+          ok = false;  // 占据 / 出图 / 未知过多
+          break;
+        }
+        if (ok) free_out.push_back(c);
+      }
+    }
+  }
+  // =========================================================
   return output;
 }
 // auto TerrainAnalyzer::analyze(const utils::RobotState &robot_pose,

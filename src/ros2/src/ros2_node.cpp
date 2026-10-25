@@ -27,6 +27,7 @@ namespace planner {
 GlobalPlanner2d::GlobalPlanner2d(rclcpp::Node::SharedPtr nh_, std::string params_path):
     config(params_path),
     nh(nh_),
+    frame_id(config.frame_id),
     mapInitialized(false),
     visualizer(nh_),
     //fsm_(config.fsm_config),
@@ -321,8 +322,8 @@ void GlobalPlanner2d::plan_omni() {
         }
 
         plan_start_time_ = now;
-        visualizer.PubGlobalPath(path_result.planning_traj.raw_path);
-        visualizer.PubOptPath(path_result.ma_spline_traj.trajectory);
+        visualizer.PubGlobalPath(path_result.planning_traj.raw_path,frame_id);
+        visualizer.PubOptPath(path_result.ma_spline_traj.trajectory,frame_id);
 
         std::vector<Eigen::Vector3d> route;
         for (auto point: path_result.planning_traj.optimized_path) {
@@ -402,7 +403,7 @@ void GlobalPlanner2d::plan_omni() {
             }
 
             visualizer
-                .visualizeTunnelAndFold(result->ma_spline_traj, route, *plan_map, fold_pts, unfold_pts);
+                .visualizeTunnelAndFold(result->ma_spline_traj, route, *plan_map, fold_pts, unfold_pts,frame_id);
         }
         auto msg = pub_nav_feedback();
 
@@ -430,7 +431,21 @@ auto GlobalPlanner2d::pub_nav_feedback() -> std_msgs::msg::Int16 {
     }
     return msg;
 };
+// 输入消息坐标系与配置的全局 frame_id 不一致时告警一次（本节点不做 TF 变换，坐标按原值使用）
+static void warn_frame_mismatch_once(
+    bool& warned, const std::string& topic, const std::string& msg_frame, const std::string& expect
+) {
+    if (warned || msg_frame.empty() || msg_frame == expect) return;
+    warned = true;
+    logger::warn(
+        logger::ros2,
+        "Topic {} frame_id '{}' != configured ros2.frame_id '{}'; no TF transform is applied, check planner.yaml",
+        topic, msg_frame, expect
+    );
+}
+
 void GlobalPlanner2d::odom_callback(const nav_msgs::msg::Odometry::SharedPtr& msg) {
+    warn_frame_mismatch_once(odom_frame_warned_, config.odom_topic_name, msg->header.frame_id, frame_id);
     if (!current_pose.has_value()) {
         current_pose = utils::RobotState();
     }
@@ -466,12 +481,13 @@ void GlobalPlanner2d::odom_callback(const nav_msgs::msg::Odometry::SharedPtr& ms
     ma_map_->update_odom(pose);
 };
 void GlobalPlanner2d::map_callback(const sensor_msgs::msg::PointCloud2::SharedPtr& msg) {
+    warn_frame_mismatch_once(cloud_frame_warned_, config.map_topic_name, msg->header.frame_id, frame_id);
     rog_map::PointCloud pc;
     pcl::fromROSMsg(*msg, pc);
     ma_map_->update_cloud(pc);
     ma_map_->update_map();
     grid_map_ = ma_map_->get_grid_map();
-    visualizer.visualize_occupied_map(*grid_map_);
+    visualizer.visualize_occupied_map(*grid_map_,frame_id);
     mapInitialized = true;
 }
 void GlobalPlanner2d::pub_callback() {
@@ -488,12 +504,12 @@ void GlobalPlanner2d::pub_callback() {
             last_pub = now;
         }
     }
-    visualizer.map_viz_callback(*ma_map_);
+    visualizer.map_viz_callback(*ma_map_,frame_id);
     // 取当前快照（与地图线程不共享同一个 shared_ptr 变量，避免并发读写指针本身）
     if (mapInitialized) {
         const auto viz_map = ma_map_->get_grid_map();
-        visualizer.visualize_occupied_grid(*viz_map);
-        visualizer.visualize_esdf_grid(*viz_map);
+        visualizer.visualize_occupied_grid(*viz_map,frame_id);
+        visualizer.visualize_esdf_grid(*viz_map,frame_id);
     }
 }
 
@@ -505,6 +521,7 @@ void GlobalPlanner2d::target_callback(const geometry_msgs::msg::PoseStamped::Sha
     //     msg->pose.position.y,
     //     msg->pose.position.z
     // );
+    warn_frame_mismatch_once(target_frame_warned_, config.target_topic_name, msg->header.frame_id, frame_id);
     if (mapInitialized) {
         const Eigen::Vector3d goal(msg->pose.position.x, msg->pose.position.y, 1.0);
         if (old_goal_pose_ == goal) {
@@ -566,7 +583,7 @@ void GlobalPlanner2d::clicked_point_callback(const geometry_msgs::msg::PointStam
     // 生成可视化 marker
     visualization_msgs::msg::Marker region;
     region.header.stamp = nh->now();
-    region.header.frame_id = "world";
+    region.header.frame_id = frame_id;
     region.ns = "clicked_region";
     region.id = static_cast<int>(clicked_regions_.size());
     region.type = visualization_msgs::msg::Marker::LINE_STRIP;
@@ -872,7 +889,7 @@ void GlobalPlanner2d::load_clicked_regions(const std::string& yaml_path) {
 
             visualization_msgs::msg::Marker region;
             region.header.stamp = nh->now();
-            region.header.frame_id = "world";
+            region.header.frame_id = frame_id;
             region.ns = "clicked_region";
             region.id = index;
             region.type = visualization_msgs::msg::Marker::LINE_STRIP;

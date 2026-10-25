@@ -20,6 +20,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <string>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include "pcl_conversions/pcl_conversions.h"
@@ -346,13 +347,13 @@ public:
     }
     // Visualize the trajectory and its front-end path
     template<int D>
-    inline void visualize(const Trajectory<D, 2>& traj, const std::vector<Eigen::Vector3d>& route) {
+    inline void visualize(const Trajectory<D, 2>& traj, const std::vector<Eigen::Vector3d>& route,std::string frame_id = "world") {
         visualization_msgs::msg::Marker routeMarker, wayPointsMarker, trajMarker;
 
         routeMarker.id = 0;
         routeMarker.type = visualization_msgs::msg::Marker::LINE_LIST;
         routeMarker.header.stamp = node->now();
-        routeMarker.header.frame_id = "world";
+        routeMarker.header.frame_id = frame_id;
         routeMarker.pose.orientation.w = 1.00;
         routeMarker.action = visualization_msgs::msg::Marker::ADD;
         routeMarker.ns = "route";
@@ -374,7 +375,7 @@ public:
         wayPointsMarker.scale.z = 0.35;
 
         trajMarker = routeMarker;
-        trajMarker.header.frame_id = "world";
+        trajMarker.header.frame_id = frame_id;
         trajMarker.id = 0;
         trajMarker.ns = "trajectory";
         trajMarker.color.r = 0.00;
@@ -440,10 +441,10 @@ public:
         }
     }
 
-    void PubWayPoints(SplineTrajectory::PPolyND<2, 6> traj) {
+    void PubWayPoints(SplineTrajectory::PPolyND<2, 6> traj, std::string frame_id = "world") {
         // 1. 航点
         visualization_msgs::msg::Marker waypoints_marker;
-        waypoints_marker.header.frame_id = "world";
+        waypoints_marker.header.frame_id = frame_id;
         waypoints_marker.header.stamp = this->node->now();
         waypoints_marker.ns = "waypoints";
         waypoints_marker.id = 0;
@@ -468,9 +469,9 @@ public:
         }
         wayPointsPub->publish(waypoints_marker);
     };
-    void PubTrajectory(SplineTrajectory::PPolyND<2, 6> traj, std::vector<Eigen::Vector2d> dense_path) {
+    void PubTrajectory(SplineTrajectory::PPolyND<2, 6> traj, std::vector<Eigen::Vector2d> dense_path, std::string frame_id = "world") {
         visualization_msgs::msg::Marker traj_marker;
-        traj_marker.header.frame_id = "world";
+        traj_marker.header.frame_id = frame_id;
         traj_marker.header.stamp = node->now();
         traj_marker.ns = "trajectory";
         traj_marker.id = 0;
@@ -491,9 +492,9 @@ public:
         }
         trajectoryPub->publish(traj_marker);
     }
-    void PubOptPath(std::vector<Eigen::Vector2d>& path) {
+    void PubOptPath(std::vector<Eigen::Vector2d>& path, std::string frame_id = "world") {
         nav_msgs::msg::Path nav_path;
-        nav_path.header.frame_id = "world";
+        nav_path.header.frame_id = frame_id;
         nav_path.header.stamp = rclcpp::Clock().now(); // 或使用 node->get_clock()->now()
 
         for (const auto& pt: path) {
@@ -603,9 +604,9 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
 
     OptPathPub->publish(nav_path);
 }
-    void PubGlobalPath(std::vector<Eigen::Vector2d>& path) {
+    void PubGlobalPath(std::vector<Eigen::Vector2d>& path, std::string frame_id = "world") {
         nav_msgs::msg::Path nav_path;
-        nav_path.header.frame_id = "world";
+        nav_path.header.frame_id = frame_id;
         nav_path.header.stamp = rclcpp::Clock().now(); // 或使用 node->get_clock()->now()
 
         for (const auto& pt: path) {
@@ -1051,13 +1052,13 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
     // }
 
     // Visualize all spheres with centers sphs and the same radius
-    inline void visualizeSphere(const Eigen::Vector3d& center, const double& radius) {
+    inline void visualizeSphere(const Eigen::Vector3d& center, const double& radius,std::string frame_id = "world") {
         visualization_msgs::msg::Marker sphereMarkers, sphereDeleter;
 
         sphereMarkers.id = 0;
         sphereMarkers.type = visualization_msgs::msg::Marker::SPHERE_LIST;
         sphereMarkers.header.stamp = node->now();
-        sphereMarkers.header.frame_id = "world";
+        sphereMarkers.header.frame_id = frame_id;
         sphereMarkers.pose.orientation.w = 1.00;
         sphereMarkers.action = visualization_msgs::msg::Marker::ADD;
         sphereMarkers.ns = "spheres";
@@ -1083,7 +1084,7 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
         spherePub->publish(sphereMarkers);
     }
 
-    inline void visualizeStartGoal(const Eigen::Vector3d& center, const double& radius, const int sg) {
+    inline void visualizeStartGoal(const Eigen::Vector3d& center, const double& radius, const int sg, std::string frame_id = "world") {
         ;
         // RCLCPP_INFO(node->get_logger(), "Visualizing start/goal point with
         // position (%.2f, %.2f, %.2f)", center(0), center(1), center(2));
@@ -1092,7 +1093,7 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
         sphereMarkers.id = sg;
         sphereMarkers.type = visualization_msgs::msg::Marker::SPHERE_LIST;
         sphereMarkers.header.stamp = node->now();
-        sphereMarkers.header.frame_id = "world";
+        sphereMarkers.header.frame_id = frame_id;
         sphereMarkers.pose.orientation.w = 1.00;
         sphereMarkers.action = visualization_msgs::msg::Marker::ADD;
         sphereMarkers.ns = "StartGoal";
@@ -1131,7 +1132,8 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
         const utils::Color& color,
         const double& size_x = 0.1,
         const double& alpha = 1.0,
-        const bool& print_ns = true
+        const bool& print_ns = true,
+        const std::string& frame_id = "world"
     ) {
         utils::Vec3f size = (box_max - box_min) / 2;
         utils::Vec3f vis_pos_world = (box_min + box_max) / 2;
@@ -1143,7 +1145,7 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
         int id = 0;
         visualization_msgs::msg::Marker line_strip;
         line_strip.header.stamp = rclcpp::Time(stamp);
-        line_strip.header.frame_id = "world";
+        line_strip.header.frame_id = frame_id;
         line_strip.action = visualization_msgs::msg::Marker::ADD;
         line_strip.ns = ns;
         line_strip.pose.orientation.w = 1.0;
@@ -1206,10 +1208,11 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
         const utils::Vec3f& position,
         const utils::Color& c = utils::Color::White(),
         const double& size = 0.6,
-        const int& id = -1
+        const int& id = -1,
+        const std::string& frame_id = "world"
     ) {
         visualization_msgs::msg::Marker marker;
-        marker.header.frame_id = "world";
+        marker.header.frame_id = frame_id;
         marker.header.stamp = rclcpp::Time(stamp);
         marker.action = visualization_msgs::msg::Marker::ADD;
         marker.pose.orientation.w = 1.0;
@@ -1239,7 +1242,8 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
         std::string ns = "pt",
         double size = 0.1,
         int id = -1,
-        const bool& print_ns = true
+        const bool& print_ns = true,
+        const std::string& frame_id = "world"
     ) {
         visualization_msgs::msg::Marker marker_ball;
         static int cnt = 0;
@@ -1247,7 +1251,7 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
         if (std::isnan(pt.x()) || std::isnan(pt.y()) || std::isnan(pt.z())) {
             return;
         }
-        marker_ball.header.frame_id = "world";
+        marker_ball.header.frame_id = frame_id;
         marker_ball.header.stamp = rclcpp::Time(stamp);
         marker_ball.ns = ns.c_str();
         marker_ball.id = id >= 0 ? id : cnt++;
@@ -1270,7 +1274,7 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
         // add test
         if (print_ns) {
             visualization_msgs::msg::Marker marker;
-            marker.header.frame_id = "world";
+            marker.header.frame_id = frame_id;
             marker.header.stamp = rclcpp::Time(stamp);
             marker.action = visualization_msgs::msg::Marker::ADD;
             marker.pose.orientation.w = 1.0;
@@ -1292,7 +1296,7 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             mkr_arr.markers.push_back(marker);
         }
     }
-    void vecEVec3fToPC2(const utils::vec_E<utils::Vec3f>& points, sensor_msgs::msg::PointCloud2& cloud) {
+    void vecEVec3fToPC2(const utils::vec_E<utils::Vec3f>& points, sensor_msgs::msg::PointCloud2& cloud, const std::string& frame_id = "world") {
         // 设置header信息
         pcl::PointCloud<pcl::PointXYZ> pcl_cloud;
         pcl_cloud.resize(points.size());
@@ -1303,9 +1307,9 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
         }
         pcl::toROSMsg(pcl_cloud, cloud);
         cloud.header.stamp = node->get_clock()->now();
-        cloud.header.frame_id = "world";
+        cloud.header.frame_id = frame_id;
     }
-    void map_viz_callback(ma_map::MaMap& ma_map) {
+    void map_viz_callback(ma_map::MaMap& ma_map,std::string frame_id = "world") {
         auto rog_map = ma_map.get_rog_map();
         auto cfg_ = ma_map.get_config();
         utils::Vec3f box_max = rog_map->robot_state_.p + cfg_.visualization_range / 2;
@@ -1321,12 +1325,12 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             utils::vec_E<utils::Vec3f> unknown_map, inf_unknown_map;
             rog_map->boxSearch(box_min, box_max, utils::UNKNOWN, unknown_map);
             sensor_msgs::msg::PointCloud2 cloud_msg;
-            vecEVec3fToPC2(unknown_map, cloud_msg);
+            vecEVec3fToPC2(unknown_map, cloud_msg, frame_id);
             cloud_msg.header.stamp = node->get_clock()->now();
             unknown_pub->publish(cloud_msg);
             if (cfg_.unk_inflation_en && unknown_inf_pub->get_subscription_count() >= 1) {
                 rog_map->boxSearchInflate(box_min, box_max, utils::UNKNOWN, inf_unknown_map);
-                vecEVec3fToPC2(inf_unknown_map, cloud_msg);
+                vecEVec3fToPC2(inf_unknown_map, cloud_msg, frame_id);
                 cloud_msg.header.stamp = node->get_clock()->now();
                 unknown_inf_pub->publish(cloud_msg);
             }
@@ -1336,7 +1340,7 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             utils::vec_E<utils::Vec3f> frontier_map;
             rog_map->boxSearch(box_min, box_max, utils::FRONTIER, frontier_map);
             sensor_msgs::msg::PointCloud2 cloud_msg;
-            vecEVec3fToPC2(frontier_map, cloud_msg);
+            vecEVec3fToPC2(frontier_map, cloud_msg, frame_id);
             cloud_msg.header.stamp = node->get_clock()->now();
             frontier_pub->publish(cloud_msg);
         }
@@ -1346,13 +1350,13 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
 
         if (occ_pub->get_subscription_count() >= 1) {
             rog_map->boxSearch(box_min, box_max, utils::OCCUPIED, occ_map);
-            vecEVec3fToPC2(occ_map, cloud_msg);
+            vecEVec3fToPC2(occ_map, cloud_msg, frame_id);
             occ_pub->publish(cloud_msg);
         }
 
         if (occ_inf_pub->get_subscription_count() >= 1) {
             rog_map->boxSearchInflate(box_min, box_max, utils::OCCUPIED, inf_occ_map);
-            vecEVec3fToPC2(inf_occ_map, cloud_msg);
+            vecEVec3fToPC2(inf_occ_map, cloud_msg, frame_id);
             cloud_msg.header.stamp = node->get_clock()->now();
             occ_inf_pub->publish(cloud_msg);
         }
@@ -1364,7 +1368,7 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
                 rog_map->get_esdf_map()
                     ->getPositiveESDFPointCloud(box_min, box_max, rog_map->robot_state_.p.z() - 0.5, pc);
                 pcl::toROSMsg(pc, cloud_msg);
-                cloud_msg.header.frame_id = "world";
+                cloud_msg.header.frame_id = frame_id;
                 cloud_msg.header.stamp = node->get_clock()->now();
                 esdf_pub->publish(cloud_msg);
             }
@@ -1393,7 +1397,11 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             box_min,
             box_max,
             "Visualization Range",
-            utils::Color::Purple()
+            utils::Color::Purple(),
+            0.1,
+            1.0,
+            true,
+            frame_id
         );
         visualizeText(
             mkr_arr,
@@ -1403,7 +1411,8 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             box_max + utils::Vec3f(0, 0, 0.5),
             utils::Color::Purple(),
             0.6,
-            0
+            0,
+            frame_id
         );
 
         /* Publish local map range */
@@ -1415,7 +1424,11 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             local_map_min,
             local_map_max,
             "Local Map Range",
-            utils::Color::Orange()
+            utils::Color::Orange(),
+            0.1,
+            1.0,
+            true,
+            frame_id
         );
         visualizeText(
             mkr_arr,
@@ -1425,7 +1438,8 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             local_map_max + utils::Vec3f(0, 0, 1.0),
             utils::Color::Orange(),
             0.6,
-            0
+            0,
+            frame_id
         );
 
         /* Publish Ray-casting range */
@@ -1435,7 +1449,11 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             rog_map->get_raycast_data().cache_box_min,
             rog_map->get_raycast_data().cache_box_max,
             "Updating Range",
-            utils::Color::Green()
+            utils::Color::Green(),
+            0.1,
+            1.0,
+            true,
+            frame_id
         );
         visualizeText(
             mkr_arr,
@@ -1445,7 +1463,8 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             rog_map->get_raycast_data().cache_box_max + utils::Vec3f(0, 0, 0.5),
             utils::Color::Green(),
             0.6,
-            0
+            0,
+            frame_id
         );
 
         /* Publish Local map origin */
@@ -1456,7 +1475,9 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
             utils::Color::Red(),
             "Local Map Origin",
             0.2,
-            0
+            0,
+            true,
+            frame_id
         );
 
         if (cfg_.esdf_en) {
@@ -1470,7 +1491,8 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
                 esdf_box_max + utils::Vec3f(0, 0, 1.0),
                 utils::Color::Blue(),
                 0.6,
-                0
+                0,
+                frame_id
             );
             visualizeBoundingBox(
                 mkr_arr,
@@ -1478,7 +1500,11 @@ void PubOptPath(SplineTrajectory::PPolyND<2, 6> traj, const std::string& frame_i
                 esdf_box_min,
                 esdf_box_max,
                 "ESDF Updating Range",
-                utils::Color::Blue()
+                utils::Color::Blue(),
+                0.1,
+                1.0,
+                true,
+                frame_id
             );
         }
 

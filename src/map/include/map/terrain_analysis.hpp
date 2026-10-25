@@ -55,6 +55,9 @@ public:
                  const Map& occ_map, Map& free_out) -> Map;
 
     // 带 3D 空闲/未知证据的版本；voxel_query 为空时与上面完全一致。
+    // 额外的空闲证据：本格没有占据体素、8 邻域本帧无障碍格，且邻域地面（中位数）往上
+    // 到 robot_height 的体素已知空闲（最多跳过 overhang_unknown_skip 个未知）。
+    // 用于清掉"3D 层已被射线擦空、2D 层还残留"的旧障碍。
     auto analyze(const utils::RobotState& robot_pose,
                  const Map& occ_map, Map& free_out,
                  const VoxelQuery& voxel_query) -> Map;

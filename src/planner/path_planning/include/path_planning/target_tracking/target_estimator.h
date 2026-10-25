@@ -3,7 +3,7 @@
  * 目标状态估计：2D 匀速模型卡尔曼滤波，状态 x = [px, py, vx, vy]。
  * 对应 Elastic-Tracker 的 target_ekf（去掉 z、去掉相机投影，直接用世界系位置观测）。
  *
- * 暂时只用位置观测（world 系），未使用观测协方差/速度观测，观测噪声取固定参数 kf_meas_noise。
+ * 暂时处理：只用位置观测（world 系），未使用观测协方差/速度观测，观测噪声取固定参数 kf_meas_noise。
  */
 #include "path_planning/target_tracking/tracking_types.h"
 #include <Eigen/Core>

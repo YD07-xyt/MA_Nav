@@ -12,7 +12,10 @@
  *   else if (out.goal && out.goal_updated) → 把 out.goal 作为 goal_pose 交给 FsmReplan::plan
  *   out.gimbal                          → 云台：release=true 释放给自瞄，否则按 out.gimbal.yaw 控制
  *
- * 第一阶段只做选点，不改优化器：可见性仅在观测点处保证，从当前位置到观测点的途中不保证可见。
+ * 暂时处理：第一阶段只做选点，不改优化器。可见性仅在观测点处保证，从当前位置到观测点的途中不保证可见。
+ *
+ * 文档：src/planner/path_planning/src/target_tracking/README.md（流程、接入、调参、已知问题）
+ * 参数说明与调参：tracking_types.h 中 TargetTrackingParams 的注释
  */
 #include "map/grid_map.hpp"
 #include "path_planning/target_tracking/target_estimator.h"

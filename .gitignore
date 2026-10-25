@@ -7,3 +7,5 @@ log
 .tmp_a2_cache
 .tmp_a2_cache2
 rosbag
+images/output/*.csv
+images/output/*.json
